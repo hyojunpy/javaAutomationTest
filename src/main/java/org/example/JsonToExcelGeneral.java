@@ -45,14 +45,6 @@ public class JsonToExcelGeneral {
     static final String TEMPLATE_12_NAME = "2022~ 2025 조리지시서(만1-2세 일반형).xlsx";
     static final String TEMPLATE_35_NAME = "2022~ 2025 조리지시서(만3-5세 일반형).xlsx";
 
-    // English comment: Company size in Excel (cm)
-    static final double COMPANY_W_CM = 6.54;
-    static final double COMPANY_H_CM = 0.96;
-
-    // English comment: Logo size in Excel (cm)
-    static final double LOGO_W_CM = 5.08;
-    static final double LOGO_H_CM = 2.20;
-
     /* ===== Headers ===== */
     static final String[] HEADER_12 = { "구분", "메뉴명", "식재료명",
             "1인 제공량(g)\n1~2세", "총 발주량\n1~2세", "만드는방법" };
@@ -476,6 +468,9 @@ public class JsonToExcelGeneral {
         t0.setCellValue(titleText);
         t0.setCellStyle(S.title);
         addMergeSafe(sh, new CellRangeAddress(tr.getRowNum(), tr.getRowNum(), OUT_COL_OFFSET, LAST_COL));
+
+        CellRangeAddress titleOuter = new CellRangeAddress(tr.getRowNum(), tr.getRowNum(), OUT_COL_OFFSET, LAST_COL);
+        setMergedBorder(sh, titleOuter, BorderStyle.DOUBLE);
 
         // Header
         int headerRowIndex;
@@ -1288,9 +1283,7 @@ public class JsonToExcelGeneral {
         }
     }
 
-    static int createTopMergedBanner(Sheet sh, Styles S, int startRow, int firstCol, int lastCol, TplKind kind) throws Exception {
-
-
+    static int createTopMergedBanner(Sheet sh, Styles S, int startRow, int firstCol, int lastCol, TplKind kind) {
 
         // Row 1
         Row r1 = sh.createRow(startRow);
@@ -1313,29 +1306,33 @@ public class JsonToExcelGeneral {
         c.setCellStyle(S.banner);
 
         // English comment: Add images for P35 only (keep original size).
-        int logoCol = 1; // B
-        int companyCol;
-        if (kind == TplKind.P35) companyCol = 9; // J
-        else companyCol = 8; // I
+        try {
+            Path logoPath = Paths.get("input/Logo.png");
+            Path compPath = Paths.get("input/Company.png");
 
-        int bannerRowStart = startRow;
-        int bannerRowEndEx = startRow + 3;
+            if (Files.exists(logoPath)) {
+                byte[] b = Files.readAllBytes(logoPath);
 
-        Path logoPath = Paths.get("input/Logo.png");
-        Path compPath = Paths.get("input/Company.png");
+                // Logo: start at B (index 1). Place within banner area.
+                int logoColStart = 1;
+                int logoColEndEx = 3; // B~C (필요하면 조절)
 
-        if (Files.exists(logoPath)) {
-            byte[] b = Files.readAllBytes(logoPath);
-            addPictureVertCenterFixedCm(sh, b, Workbook.PICTURE_TYPE_PNG,
-                    logoCol, bannerRowStart, bannerRowEndEx,
-                    LOGO_W_CM, LOGO_H_CM);
-        }
+                addPictureVertCenter(sh, b, Workbook.PICTURE_TYPE_PNG, logoColStart, logoColEndEx, startRow, startRow + 3);
+            }
 
-        if (Files.exists(compPath)) {
-            byte[] b = Files.readAllBytes(compPath);
-            addPictureVertCenterFixedCm(sh, b, Workbook.PICTURE_TYPE_PNG,
-                    companyCol, bannerRowStart, bannerRowEndEx,
-                    COMPANY_W_CM, COMPANY_H_CM);
+            if (Files.exists(compPath)) {
+                byte[] b = Files.readAllBytes(compPath);
+
+                int compColStart;
+                if (kind == TplKind.P35) compColStart = 9; // J
+                else compColStart = 8;                    // I
+
+                int compColEndEx = compColStart + 3;
+
+                addPictureVertCenter(sh, b, Workbook.PICTURE_TYPE_PNG, compColStart, compColEndEx, startRow, startRow + 3);
+            }
+        } catch (Exception ignore) {
+            // English comment: Ignore image errors
         }
 
         // English comment: Return the next available row index after the banner
@@ -1358,16 +1355,14 @@ public class JsonToExcelGeneral {
     }
 
     // English comment: Add picture anchored to a column range and vertically centered within given row range.
-    // English comment: Add picture with fixed size (cm) and vertically centered within the given row range.
-    static void addPictureVertCenterFixedCm(
+    static void addPictureVertCenter(
             Sheet sh,
             byte[] imgBytes,
             int pictureType,
             int colStart,
+            int colEndExclusive,
             int rowStart,
-            int rowEndExclusive,
-            double targetWidthCm,
-            double targetHeightCm
+            int rowEndExclusive
     ) throws Exception {
 
         int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
@@ -1376,31 +1371,34 @@ public class JsonToExcelGeneral {
         CreationHelper helper = sh.getWorkbook().getCreationHelper();
 
         ClientAnchor anchor = helper.createClientAnchor();
-
-        // English comment: Keep picture size fixed even if cells are resized.
-        anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
+        anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_AND_RESIZE);
 
         anchor.setCol1(colStart);
+        anchor.setCol2(colEndExclusive);
+
         anchor.setRow1(rowStart);
+        anchor.setRow2(rowEndExclusive);
 
-        // English comment: Make col2/row2 safely large; dx2/dy2 will define actual size.
-        anchor.setCol2(colStart + 20);
-        anchor.setRow2(rowEndExclusive + 20);
+        // English comment: Read image size (pixels) to compute EMU height
+        BufferedImage bi = ImageIO.read(new java.io.ByteArrayInputStream(imgBytes));
+        int imgWpx = bi.getWidth();
+        int imgHpx = bi.getHeight();
+        int imgWem = org.apache.poi.util.Units.pixelToEMU(imgWpx);
+        int imgHem = org.apache.poi.util.Units.pixelToEMU(imgHpx);
 
-        int wEmu = cmToEmu(targetWidthCm);
-        int hEmu = cmToEmu(targetHeightCm);
-
-        // English comment: Banner total height (rowStart..rowEndExclusive-1) in EMU
+        // English comment: Banner (rowStart..rowEndExclusive-1) total height in EMU
         int bannerHem = sumRowsHeightEmu(sh, rowStart, rowEndExclusive - 1);
 
         int dyTop = 0;
-        if (bannerHem > hEmu) dyTop = (bannerHem - hEmu) / 2;
+        if (bannerHem > imgHem) {
+            dyTop = (bannerHem - imgHem) / 2;
+        }
 
         anchor.setDx1(0);
         anchor.setDy1(dyTop);
 
-        anchor.setDx2(wEmu);
-        anchor.setDy2(dyTop + hEmu);
+        anchor.setDx2(imgWem);
+        anchor.setDy2(dyTop + imgHem);
 
         drawing.createPicture(anchor, picIdx);
     }
@@ -1410,13 +1408,6 @@ public class JsonToExcelGeneral {
         if (kind == TplKind.P35) methodFirst = 7;
         else methodFirst = 5;
         return methodFirst + 4;
-    }
-
-    // 이미지 cm TO EMU
-    static int cmToEmu(double cm) {
-        double inches = cm / 2.54;
-        double emu = inches * 914400.0;
-        return (int) Math.round(emu);
     }
 
     // New: Convert JSON -> EXCEL with explicit paths (for AllInOne)
