@@ -38,7 +38,7 @@
 
     public class HwpToJsonGeneral {
         // ===== Default input path (used when no CLI arg is provided) =====
-        private static final String DEFAULT_IN = "input/2025년 12월 일반형(만1-2세).hwp";
+        private static final String DEFAULT_IN = "input/2026년 1월 일반형(만3-5세).hwp";
 
         private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         private static HWPFile HWP;
@@ -209,7 +209,7 @@
             List<Row> rows = ct.getRowList();
             if (rows == null || rows.isEmpty()) return null;
 
-            dumpTableTsv(rows, OUT_TSV); // debug snapshot per table
+//            dumpTableTsv(rows, OUT_TSV); // debug snapshot per table
 
             List<String> currentHeader = null;
             List<Row>    menuRows      = new ArrayList<>();
@@ -924,20 +924,20 @@
             return vals;
         }
 
-        private static void dumpTableTsv(List<Row> rows, Path OUT_TSV) {
-            try (PrintWriter pw = new PrintWriter(Files.newBufferedWriter(OUT_TSV))) {
-                for (Row r : rows) {
-                    List<String> cols = new ArrayList<>();
-                    if (r.getCellList() != null) {
-                        for (int i = 0; i < r.getCellList().size(); i++) {
-                            String keep = readCellKeepNewlines(r, i).replace('\t', ' ');
-                            cols.add(keep.replace("\n", "⏎"));
-                        }
-                    }
-                    pw.println(String.join("\t", cols));
-                }
-            } catch (Exception ignore) {}
-        }
+//        private static void dumpTableTsv(List<Row> rows, Path OUT_TSV) {
+//            try (PrintWriter pw = new PrintWriter(Files.newBufferedWriter(OUT_TSV))) {
+//                for (Row r : rows) {
+//                    List<String> cols = new ArrayList<>();
+//                    if (r.getCellList() != null) {
+//                        for (int i = 0; i < r.getCellList().size(); i++) {
+//                            String keep = readCellKeepNewlines(r, i).replace('\t', ' ');
+//                            cols.add(keep.replace("\n", "⏎"));
+//                        }
+//                    }
+//                    pw.println(String.join("\t", cols));
+//                }
+//            } catch (Exception ignore) {}
+//        }
 
         private static void dumpByDateSnapshot(Map<Integer, DayPlan> byDate) {
             System.out.println("\n==== SNAPSHOT byDate ====");

@@ -11,7 +11,9 @@ import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+import javax.imageio.ImageIO;
 import java.awt.Color;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.*;
@@ -37,11 +39,19 @@ public class JsonToExcelGeneral {
 
     /* ===== Paths ===== */
     // English comment: Default is only fallback when no args are provided
-    static final Path JSON_PLAN = Paths.get("output/2025년 12월 일반형(만1-2세).json");
+    static final Path JSON_PLAN = Paths.get("output/26.01. 만3-5세 일반형.json");
 
     // English comment: Template filenames (resolved under app.home/input first)
     static final String TEMPLATE_12_NAME = "2022~ 2025 조리지시서(만1-2세 일반형).xlsx";
     static final String TEMPLATE_35_NAME = "2022~ 2025 조리지시서(만3-5세 일반형).xlsx";
+
+    // English comment: Company size in Excel (cm)
+    static final double COMPANY_W_CM = 6.54;
+    static final double COMPANY_H_CM = 0.96;
+
+    // English comment: Logo size in Excel (cm)
+    static final double LOGO_W_CM = 5.08;
+    static final double LOGO_H_CM = 2.20;
 
     /* ===== Headers ===== */
     static final String[] HEADER_12 = { "구분", "메뉴명", "식재료명",
@@ -156,6 +166,7 @@ public class JsonToExcelGeneral {
     /* ===== Styles ===== */
     static class Styles {
         final CellStyle title, header, bodyCenter, methodMerged, num1;
+        final CellStyle banner;
         final CellStyle headerNoFill;
         final CellStyle labelAm, labelLunch, labelPm;
         final CellStyle dec1;
@@ -166,7 +177,7 @@ public class JsonToExcelGeneral {
         final CellStyle headerKidsFill12; // #FFFF9F
         final CellStyle headerKidsFill35;
 
-        Styles(CellStyle title, CellStyle header,CellStyle headerNoFill, CellStyle bodyCenter,
+        Styles(CellStyle title, CellStyle banner,CellStyle header,CellStyle headerNoFill, CellStyle bodyCenter,
                CellStyle methodMerged, CellStyle num1, CellStyle dec1,
                CellStyle labelAm, CellStyle labelLunch, CellStyle labelPm,
                CellStyle kidsCnt12Fill, CellStyle kidsCnt35Fill, CellStyle headerKidsFill12,
@@ -179,6 +190,7 @@ public class JsonToExcelGeneral {
             this.headerKidsFill12 = headerKidsFill12;
             this.headerKidsFill35 = headerKidsFill35;
             this.headerNoFill = headerNoFill;
+            this.banner = banner;
         }
 
         static Styles build(Workbook wb){
@@ -192,6 +204,11 @@ public class JsonToExcelGeneral {
             headerFont.setFontName("한컴산뜻돋움");
             headerFont.setBold(true);
             headerFont.setFontHeightInPoints((short)12);
+
+            Font bannerFont = wb.createFont();
+            bannerFont.setFontName("한컴산뜻돋움");
+            bannerFont.setBold(true);
+            bannerFont.setFontHeightInPoints((short)40);
 
             CellStyle base = wb.createCellStyle();
             base.setBorderBottom(BorderStyle.THIN);
@@ -213,6 +230,13 @@ public class JsonToExcelGeneral {
             } else {
                 title.setFillForegroundColor(IndexedColors.PALE_BLUE.getIndex());
             }
+
+            CellStyle banner = wb.createCellStyle();
+            banner.cloneStyleFrom(base);
+            banner.setAlignment(HorizontalAlignment.CENTER);
+            banner.setVerticalAlignment(VerticalAlignment.CENTER);
+            banner.setWrapText(false);
+            banner.setFont(bannerFont);
 
             CellStyle header = wb.createCellStyle();
             header.cloneStyleFrom(base);
@@ -271,7 +295,7 @@ public class JsonToExcelGeneral {
             CellStyle headerKidsFill12 = makeFill(wb, header, 0xFF, 0xFF, 0x9F); // #FFFF9F
             CellStyle headerKidsFill35 = makeFill(wb, header, 0xFF, 0x9B, 0x9B); // #FF9B9B
 
-            return new Styles(title, header, headerNoFill,bodyCenter, methodMerged, num1, dec1,
+            return new Styles(title, banner, header, headerNoFill, bodyCenter, methodMerged, num1, dec1,
                     labelAm, labelLunch, labelPm,
                     kidsCnt12Fill, kidsCnt35Fill, headerKidsFill12, headerKidsFill35);
         }
@@ -345,19 +369,26 @@ public class JsonToExcelGeneral {
             Sheet sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
             int currentRow = initKidsCountBlockOnce(sh, S, tplKind);
 
+            int titleLastCol = getLastCol(tplKind);
+            currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+
             for (int i = 0; i < normalDays.size(); i++) {
                 DayPlan d = normalDays.get(i);
                 if (d == null) continue;
                 if (d.date == null) continue;
 
                 currentRow = writeOneDay(sh, S, d, tpl, T, tplKind, titlePrefix, currentRow, false);
-                currentRow = currentRow + 4;
+                currentRow = currentRow + 2;
+
 
                 if (isWeekEndGeneral(d.weekday)) {
                     if (i < normalDays.size() - 1) {
                         weekIndex = weekIndex + 1;
                         sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
                         currentRow = initKidsCountBlockOnce(sh, S, tplKind);
+
+                        titleLastCol = getLastCol(tplKind);
+                        currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
                     }
                 }
             }
@@ -366,6 +397,10 @@ public class JsonToExcelGeneral {
             if (!birthdayDays.isEmpty()) {
                 Sheet bdaySheet = out.createSheet(makeBirthdaySheetName(ym));
                 int r = 0;
+
+                titleLastCol = getLastCol(tplKind);
+                r = createTopMergedBanner(bdaySheet, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+
                 for (DayPlan d : birthdayDays) {
                     r = writeOneDay(bdaySheet, S, d, tpl, T, tplKind, titlePrefix, r, true);
                     r = r + 4;
@@ -431,7 +466,6 @@ public class JsonToExcelGeneral {
 
         // Title
         Row tr = sh.createRow(r++);
-        int titleRowIndex = tr.getRowNum();
         tr.setHeightInPoints(22);
         Cell t0 = tr.createCell(OUT_COL_OFFSET);
 
@@ -451,7 +485,6 @@ public class JsonToExcelGeneral {
             // English comment: 2-row header for P12 with vertical merges on B/C/D and method block.
             Row hrTop = sh.createRow(r++);
             Row hrBot = sh.createRow(r++);
-            headerRowIndex = hrTop.getRowNum();
 
             hrTop.setHeightInPoints(22);
             hrBot.setHeightInPoints(22);
@@ -633,8 +666,9 @@ public class JsonToExcelGeneral {
         }
 
         int lastDataRow = r - 1;
-        if (lastDataRow >= headerRowIndex) {
-            CellRangeAddress outer = new CellRangeAddress(headerRowIndex, lastDataRow, 0 + OUT_COL_OFFSET, LAST_COL);
+        int titleRowIndex = tr.getRowNum();
+        if (lastDataRow >= titleRowIndex) {
+            CellRangeAddress outer = new CellRangeAddress(titleRowIndex, lastDataRow, 0, LAST_COL);
             setMergedBorder(sh, outer, BorderStyle.DOUBLE);
         }
 
@@ -645,13 +679,57 @@ public class JsonToExcelGeneral {
         for (int c = 0; c <= LAST_COL; c++) {
             // English comment: From column D (index 3) onward, force width to 11
             if (c >= 3) {
-                sh.setColumnWidth(c, 11 * 256);
+                sh.setColumnWidth(c, 12 * 256);
             } else {
                 // Keep existing widths for A~C (A is blank, B/C are table area)
                 if (c < widths.length) sh.setColumnWidth(c, widths[c]);
             }
         }
         clearBordersInColumnA(sh, startRow, r - 1);
+
+        Row gap = sh.getRow(r);
+        if (gap == null) gap = sh.createRow(r);
+        gap.setHeightInPoints(80.1f);
+
+        try {
+            // TODO: set your image path (per day or fixed)
+            Path imgPath = Paths.get("input/allergy.png"); // example
+            if (Files.exists(imgPath)) {
+
+                byte[] imgBytes = Files.readAllBytes(imgPath);
+
+                int pictureType = Workbook.PICTURE_TYPE_PNG; // change if JPG
+                int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
+
+                Drawing<?> drawing = sh.createDrawingPatriarch();
+                CreationHelper helper = sh.getWorkbook().getCreationHelper();
+
+                ClientAnchor anchor = helper.createClientAnchor();
+                anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_AND_RESIZE);
+
+                int gapRowNum = r; // this is the row we just created for spacing
+
+                // Same width as title: from OUT_COL_OFFSET to LAST_COL
+                anchor.setCol1(OUT_COL_OFFSET);
+                anchor.setCol2(LAST_COL + 1); // Excel uses exclusive end column
+
+                // Same height as the gap row (one row)
+                anchor.setRow1(gapRowNum);
+                anchor.setRow2(gapRowNum + 1); // exclusive end row
+
+                // Full cell area
+                anchor.setDx1(0);
+                anchor.setDy1(0);
+                anchor.setDx2(0);
+                anchor.setDy2(0);
+
+                drawing.createPicture(anchor, picIdx);
+            }
+        } catch (Exception ignore) {
+            // English comment: Ignore image errors to avoid breaking XLSX generation
+        }
+
+        sh.setColumnWidth(OUT_COL_OFFSET, (int) Math.round(8.3 * 256));
 
         return r;
     }
@@ -778,7 +856,7 @@ public class JsonToExcelGeneral {
         if (kind == TplKind.P35) {
             Cell d = row.createCell(3 + OUT_COL_OFFSET);
             int excelRow = row.getRowNum() + 1;
-            d.setCellFormula(String.format("E%d*0.65", excelRow));
+            d.setCellFormula(String.format("F%d*0.65", excelRow));
 
             Double p35v = parseNumericOrNull(p35);
             if (p35v != null) {
@@ -824,7 +902,7 @@ public class JsonToExcelGeneral {
 
             int excelRow = row.getRowNum() + 1;
             Cell e = row.createCell(4 + OUT_COL_OFFSET);
-            e.setCellFormula(String.format("IF($E$2=\"\",\"0\",D%d*$E$2)", excelRow));
+            e.setCellFormula(String.format("IF($E$2=\"\",\"0\",E%d*$E$2)", excelRow));
             e.setCellStyle(S.num1);
 
             Cell f = row.createCell(5 + OUT_COL_OFFSET);
@@ -1168,7 +1246,7 @@ public class JsonToExcelGeneral {
             setMergedBorder(sh, new CellRangeAddress(1, 2, 2, 4), BorderStyle.THIN);
 
             // Ensure row6 (Excel 6) is blank => start at row7 (0-based 6)
-            return 6;
+            return 3;
         }
 
         // P12: only row2 (r=1), keep row5 blank => start from row6 (r=5)
@@ -1189,7 +1267,7 @@ public class JsonToExcelGeneral {
         setMergedBorder(sh, new CellRangeAddress(1, 1, 2, 4), BorderStyle.THIN);
 
         // Ensure row5 (Excel 5) is blank => start at row6 (0-based 5)
-        return 5;
+        return 2;
     }
 
     static void clearBordersInColumnA(Sheet sh, int fromRow, int toRow) {
@@ -1210,6 +1288,136 @@ public class JsonToExcelGeneral {
         }
     }
 
+    static int createTopMergedBanner(Sheet sh, Styles S, int startRow, int firstCol, int lastCol, TplKind kind) throws Exception {
+
+
+
+        // Row 1
+        Row r1 = sh.createRow(startRow);
+        r1.setHeightInPoints(34.5f);
+
+        // Row 2
+        Row r2 = sh.createRow(startRow + 1);
+        r2.setHeightInPoints(16.5f);
+
+        // Row 3
+        Row r3 = sh.createRow(startRow + 2);
+        r3.setHeightInPoints(16.5f);
+
+        // English comment: Merge only the center text area.
+        addMergeSafe(sh, new CellRangeAddress(startRow, startRow + 2, firstCol, lastCol));
+
+        // English comment: Put text on the merged anchor cell; alignment will center it across the merged region.
+        Cell c = safeCell(sh, startRow, firstCol);
+        c.setCellValue("<조리지시서>");
+        c.setCellStyle(S.banner);
+
+        // English comment: Add images for P35 only (keep original size).
+        int logoCol = 1; // B
+        int companyCol;
+        if (kind == TplKind.P35) companyCol = 9; // J
+        else companyCol = 8; // I
+
+        int bannerRowStart = startRow;
+        int bannerRowEndEx = startRow + 3;
+
+        Path logoPath = Paths.get("input/Logo.png");
+        Path compPath = Paths.get("input/Company.png");
+
+        if (Files.exists(logoPath)) {
+            byte[] b = Files.readAllBytes(logoPath);
+            addPictureVertCenterFixedCm(sh, b, Workbook.PICTURE_TYPE_PNG,
+                    logoCol, bannerRowStart, bannerRowEndEx,
+                    LOGO_W_CM, LOGO_H_CM);
+        }
+
+        if (Files.exists(compPath)) {
+            byte[] b = Files.readAllBytes(compPath);
+            addPictureVertCenterFixedCm(sh, b, Workbook.PICTURE_TYPE_PNG,
+                    companyCol, bannerRowStart, bannerRowEndEx,
+                    COMPANY_W_CM, COMPANY_H_CM);
+        }
+
+        // English comment: Return the next available row index after the banner
+        return startRow + 3;
+    }
+
+
+    static int sumRowsHeightEmu(Sheet sh, int rowStart, int rowEndInclusive) {
+        double totalPoints = 0.0;
+        for (int r = rowStart; r <= rowEndInclusive; r++) {
+            Row row = sh.getRow(r);
+            float h;
+            if (row != null) h = row.getHeightInPoints();
+            else h = sh.getDefaultRowHeightInPoints();
+            totalPoints = totalPoints + h;
+        }
+        // 1 point = 12700 EMU
+        double emu = totalPoints * 12700.0;
+        return (int) Math.round(emu);
+    }
+
+    // English comment: Add picture anchored to a column range and vertically centered within given row range.
+    // English comment: Add picture with fixed size (cm) and vertically centered within the given row range.
+    static void addPictureVertCenterFixedCm(
+            Sheet sh,
+            byte[] imgBytes,
+            int pictureType,
+            int colStart,
+            int rowStart,
+            int rowEndExclusive,
+            double targetWidthCm,
+            double targetHeightCm
+    ) throws Exception {
+
+        int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
+
+        Drawing<?> drawing = sh.createDrawingPatriarch();
+        CreationHelper helper = sh.getWorkbook().getCreationHelper();
+
+        ClientAnchor anchor = helper.createClientAnchor();
+
+        // English comment: Keep picture size fixed even if cells are resized.
+        anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
+
+        anchor.setCol1(colStart);
+        anchor.setRow1(rowStart);
+
+        // English comment: Make col2/row2 safely large; dx2/dy2 will define actual size.
+        anchor.setCol2(colStart + 20);
+        anchor.setRow2(rowEndExclusive + 20);
+
+        int wEmu = cmToEmu(targetWidthCm);
+        int hEmu = cmToEmu(targetHeightCm);
+
+        // English comment: Banner total height (rowStart..rowEndExclusive-1) in EMU
+        int bannerHem = sumRowsHeightEmu(sh, rowStart, rowEndExclusive - 1);
+
+        int dyTop = 0;
+        if (bannerHem > hEmu) dyTop = (bannerHem - hEmu) / 2;
+
+        anchor.setDx1(0);
+        anchor.setDy1(dyTop);
+
+        anchor.setDx2(wEmu);
+        anchor.setDy2(dyTop + hEmu);
+
+        drawing.createPicture(anchor, picIdx);
+    }
+
+    static int getLastCol(TplKind kind) {
+        int methodFirst;
+        if (kind == TplKind.P35) methodFirst = 7;
+        else methodFirst = 5;
+        return methodFirst + 4;
+    }
+
+    // 이미지 cm TO EMU
+    static int cmToEmu(double cm) {
+        double inches = cm / 2.54;
+        double emu = inches * 914400.0;
+        return (int) Math.round(emu);
+    }
 
     // New: Convert JSON -> EXCEL with explicit paths (for AllInOne)
     public static Path convert(Path inputJson, Path outputXlsx) throws Exception {
@@ -1258,6 +1466,11 @@ public class JsonToExcelGeneral {
             Sheet sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
             int currentRow = initKidsCountBlockOnce(sh, S, tplKind);
 
+
+            int titleLastCol = getLastCol(tplKind);
+            currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+
+
             for (int i = 0; i < normalDays.size(); i++) {
                 DayPlan d = normalDays.get(i);
                 if (d == null) continue;
@@ -1267,13 +1480,16 @@ public class JsonToExcelGeneral {
                         sh, S, d, tpl, T, tplKind,
                         titlePrefix, currentRow, false
                 );
-                currentRow = currentRow + 4;
+                currentRow = currentRow + 2;
 
                 if (isWeekEndGeneral(d.weekday)) {
                     if (i < normalDays.size() - 1) {
                         weekIndex = weekIndex + 1;
                         sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
                         currentRow = initKidsCountBlockOnce(sh, S, tplKind);
+
+                        titleLastCol = getLastCol(tplKind);
+                        currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
                     }
                 }
             }
@@ -1282,6 +1498,9 @@ public class JsonToExcelGeneral {
             if (!birthdayDays.isEmpty()) {
                 Sheet bdaySheet = out.createSheet(makeBirthdaySheetName(ym));
                 int r = 0;
+
+                titleLastCol = getLastCol(tplKind);
+                r = createTopMergedBanner(bdaySheet, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
                 for (DayPlan d : birthdayDays) {
                     r = writeOneDay(
                             bdaySheet, S, d, tpl, T, tplKind,
