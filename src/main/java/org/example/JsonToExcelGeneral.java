@@ -9,6 +9,7 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFColor;
+import org.apache.poi.xssf.usermodel.XSSFPicture;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import javax.imageio.ImageIO;
@@ -55,6 +56,8 @@ public class JsonToExcelGeneral {
 
     /* ===== Template kinds ===== */
     enum TplKind { P12, P35 }
+
+    static final Map<String, CellStyle> BORDER_STYLE_CACHE = new HashMap<>();
 
     /* ===== Week Sheet Name ===== */
     static String weekNameKorean(int weekIndex) {
@@ -341,7 +344,7 @@ public class JsonToExcelGeneral {
         if (outXlsx.getParent() != null) Files.createDirectories(outXlsx.getParent());
 
         try (Workbook tpl = WorkbookFactory.create(Files.newInputStream(tplFile));
-             Workbook out = new XSSFWorkbook()) {
+             Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
 
             Styles S = Styles.build(out);
 
@@ -355,14 +358,31 @@ public class JsonToExcelGeneral {
                 if (ds.equalsIgnoreCase("birthday")) birthdayDays.add(d);
                 else normalDays.add(d);
             }
-
-            // English comment: Week sheets (General ends on Saturday)
             int weekIndex = 1;
-            Sheet sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
-            int currentRow = initKidsCountBlockOnce(sh, S, tplKind);
 
-            int titleLastCol = getLastCol(tplKind);
-            currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+            String baseName = "25. 12월 둘째주";
+
+            // Keep only base sheet in template workbook
+            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
+                String nm = out.getSheetName(i);
+                if (!baseName.equals(nm)) out.removeSheetAt(i);
+            }
+
+            // Re-find baseIdx (it will be 0 after pruning)
+            int baseIdx = out.getSheetIndex(baseName);
+            if (baseIdx < 0) throw new IllegalStateException("Base sheet not found: " + baseName);
+
+            int DATA_START_ROW = 6;
+            int keepLastRow = DATA_START_ROW - 1;
+
+            Sheet sh = copyTopTemplateArea(
+                    out,
+                    baseIdx,
+                    makeWeekSheetName(ym, weekIndex),
+                    keepLastRow
+            );
+
+            int currentRow = DATA_START_ROW;
 
             for (int i = 0; i < normalDays.size(); i++) {
                 DayPlan d = normalDays.get(i);
@@ -376,32 +396,45 @@ public class JsonToExcelGeneral {
                 if (isWeekEndGeneral(d.weekday)) {
                     if (i < normalDays.size() - 1) {
                         weekIndex = weekIndex + 1;
-                        sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
-                        currentRow = initKidsCountBlockOnce(sh, S, tplKind);
 
-                        titleLastCol = getLastCol(tplKind);
-                        currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+                        sh = copyTopTemplateArea(
+                                out,
+                                baseIdx,
+                                makeWeekSheetName(ym, weekIndex),
+                                keepLastRow
+                        );
+
+                        currentRow = DATA_START_ROW;
                     }
                 }
             }
 
             // English comment: Birthday dedicated sheet
             if (!birthdayDays.isEmpty()) {
-                Sheet bdaySheet = out.createSheet(makeBirthdaySheetName(ym));
-                int r = 0;
+                keepLastRow = DATA_START_ROW - 1;
 
-                titleLastCol = getLastCol(tplKind);
-                r = createTopMergedBanner(bdaySheet, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+                Sheet bdaySheet = copyTopTemplateArea(
+                        out,
+                        baseIdx,
+                        makeBirthdaySheetName(ym),
+                        keepLastRow
+                );
+
+                int r = DATA_START_ROW;
 
                 for (DayPlan d : birthdayDays) {
-                    r = writeOneDay(bdaySheet, S, d, tpl, T, tplKind, titlePrefix, r, true);
-                    r = r + 4;
+                    r = writeOneDay(bdaySheet,S,d,tpl,T,tplKind,titlePrefix,r,true);   // isBirthday = true);
+                    r = r + 4; // Birthday는 하루 블록 간격을 넉넉히
                 }
             }
+
+            int baseIdx2 = out.getSheetIndex("25. 12월 둘째주");
+            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
             try (OutputStream os = Files.newOutputStream(outXlsx)) {
                 out.write(os);
             }
+
         }
 
         System.out.println("DONE → " + outXlsx.toAbsolutePath());
@@ -671,60 +704,60 @@ public class JsonToExcelGeneral {
         if (kind == TplKind.P35) widths = widths35;
         else widths = widths12;
 
-        for (int c = 0; c <= LAST_COL; c++) {
-            // English comment: From column D (index 3) onward, force width to 11
-            if (c >= 3) {
-                sh.setColumnWidth(c, 12 * 256);
-            } else {
-                // Keep existing widths for A~C (A is blank, B/C are table area)
-                if (c < widths.length) sh.setColumnWidth(c, widths[c]);
-            }
-        }
+//        for (int c = 0; c <= LAST_COL; c++) {
+//            if (c >= 3) {
+//                sh.setColumnWidth(c, (int) Math.round(8.38 * 256));
+//            } else {
+//                if (c < widths.length) sh.setColumnWidth(c, widths[c]);
+//            }
+//        }
+//
+//        sh.setColumnWidth(OUT_COL_OFFSET, (int) Math.round(8.3 * 256));
+
         clearBordersInColumnA(sh, startRow, r - 1);
 
-        Row gap = sh.getRow(r);
-        if (gap == null) gap = sh.createRow(r);
-        gap.setHeightInPoints(80.1f);
+//        Row gap = sh.getRow(r);
+//        if (gap == null) gap = sh.createRow(r);
+//        gap.setHeightInPoints(80.1f);
+//
+//        try {
+//            // TODO: set your image path (per day or fixed)
+//            Path imgPath = Paths.get("input/allergy.png"); // example
+//            if (Files.exists(imgPath)) {
+//
+//                byte[] imgBytes = Files.readAllBytes(imgPath);
+//
+//                int pictureType = Workbook.PICTURE_TYPE_PNG; // change if JPG
+//                int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
+//
+//                Drawing<?> drawing = sh.createDrawingPatriarch();
+//                CreationHelper helper = sh.getWorkbook().getCreationHelper();
+//
+//                ClientAnchor anchor = helper.createClientAnchor();
+//                anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
+//
+//                int gapRowNum = r; // this is the row we just created for spacing
+//
+//                // Same width as title: from OUT_COL_OFFSET to LAST_COL
+//                anchor.setCol1(OUT_COL_OFFSET);
+//                anchor.setCol2(LAST_COL + 1); // Excel uses exclusive end column
+//
+//                // Same height as the gap row (one row)
+//                anchor.setRow1(gapRowNum);
+//                anchor.setRow2(gapRowNum + 1); // exclusive end row
+//
+//                // Full cell area
+//                anchor.setDx1(0);
+//                anchor.setDy1(0);
+//                anchor.setDx2(0);
+//                anchor.setDy2(0);
+//
+//                drawing.createPicture(anchor, picIdx);
+//            }
+//        } catch (Exception ignore) {
+//            // English comment: Ignore image errors to avoid breaking XLSX generation
+//        }
 
-        try {
-            // TODO: set your image path (per day or fixed)
-            Path imgPath = Paths.get("input/allergy.png"); // example
-            if (Files.exists(imgPath)) {
-
-                byte[] imgBytes = Files.readAllBytes(imgPath);
-
-                int pictureType = Workbook.PICTURE_TYPE_PNG; // change if JPG
-                int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
-
-                Drawing<?> drawing = sh.createDrawingPatriarch();
-                CreationHelper helper = sh.getWorkbook().getCreationHelper();
-
-                ClientAnchor anchor = helper.createClientAnchor();
-                anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_AND_RESIZE);
-
-                int gapRowNum = r; // this is the row we just created for spacing
-
-                // Same width as title: from OUT_COL_OFFSET to LAST_COL
-                anchor.setCol1(OUT_COL_OFFSET);
-                anchor.setCol2(LAST_COL + 1); // Excel uses exclusive end column
-
-                // Same height as the gap row (one row)
-                anchor.setRow1(gapRowNum);
-                anchor.setRow2(gapRowNum + 1); // exclusive end row
-
-                // Full cell area
-                anchor.setDx1(0);
-                anchor.setDy1(0);
-                anchor.setDx2(0);
-                anchor.setDy2(0);
-
-                drawing.createPicture(anchor, picIdx);
-            }
-        } catch (Exception ignore) {
-            // English comment: Ignore image errors to avoid breaking XLSX generation
-        }
-
-        sh.setColumnWidth(OUT_COL_OFFSET, (int) Math.round(8.3 * 256));
 
         return r;
     }
@@ -1168,11 +1201,27 @@ public class JsonToExcelGeneral {
     }
 
     static void setBorders(Cell cell, BorderStyle bs) {
-        CellStyle clone = cell.getSheet().getWorkbook().createCellStyle();
-        clone.cloneStyleFrom(cell.getCellStyle());
-        clone.setBorderBottom(bs); clone.setBorderTop(bs);
-        clone.setBorderLeft(bs); clone.setBorderRight(bs);
-        cell.setCellStyle(clone);
+        if (cell == null) return;
+
+        Workbook wb = cell.getSheet().getWorkbook();
+        CellStyle base = cell.getCellStyle();
+
+        // English comment: Key uses base style index and border style name.
+        String key = base.getIndex() + "|" + bs.name();
+
+        CellStyle cached = BORDER_STYLE_CACHE.get(key);
+        if (cached == null) {
+            CellStyle clone = wb.createCellStyle();
+            clone.cloneStyleFrom(base);
+            clone.setBorderBottom(bs);
+            clone.setBorderTop(bs);
+            clone.setBorderLeft(bs);
+            clone.setBorderRight(bs);
+            BORDER_STYLE_CACHE.put(key, clone);
+            cached = clone;
+        }
+
+        cell.setCellStyle(cached);
     }
 
     static void setMergedBorder(Sheet sh, CellRangeAddress rgn, BorderStyle bs) {
@@ -1315,9 +1364,13 @@ public class JsonToExcelGeneral {
 
                 // Logo: start at B (index 1). Place within banner area.
                 int logoColStart = 1;
-                int logoColEndEx = 3; // B~C (필요하면 조절)
 
-                addPictureVertCenter(sh, b, Workbook.PICTURE_TYPE_PNG, logoColStart, logoColEndEx, startRow, startRow + 3);
+                addPictureVertCenterByCm(sh, b, Workbook.PICTURE_TYPE_PNG,
+                        logoColStart,
+                        startRow, startRow + 3,
+                        5.05, 2.20,
+                        org.apache.poi.util.Units.pixelToEMU(4));
+
             }
 
             if (Files.exists(compPath)) {
@@ -1325,11 +1378,16 @@ public class JsonToExcelGeneral {
 
                 int compColStart;
                 if (kind == TplKind.P35) compColStart = 9; // J
-                else compColStart = 8;                    // I
+                else compColStart = 8;
 
                 int compColEndEx = compColStart + 3;
 
-                addPictureVertCenter(sh, b, Workbook.PICTURE_TYPE_PNG, compColStart, compColEndEx, startRow, startRow + 3);
+
+                addPictureVertCenterByCm(sh, b, Workbook.PICTURE_TYPE_PNG,
+                        compColStart,
+                        startRow, startRow + 3,
+                        6.62, 1.11,
+                        0);
             }
         } catch (Exception ignore) {
             // English comment: Ignore image errors
@@ -1355,14 +1413,16 @@ public class JsonToExcelGeneral {
     }
 
     // English comment: Add picture anchored to a column range and vertically centered within given row range.
-    static void addPictureVertCenter(
+    static void addPictureVertCenterByCm(
             Sheet sh,
             byte[] imgBytes,
             int pictureType,
             int colStart,
-            int colEndExclusive,
             int rowStart,
-            int rowEndExclusive
+            int rowEndExclusive,
+            double targetWcm,
+            double targetHcm,
+            int dx1Emu
     ) throws Exception {
 
         int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
@@ -1371,43 +1431,127 @@ public class JsonToExcelGeneral {
         CreationHelper helper = sh.getWorkbook().getCreationHelper();
 
         ClientAnchor anchor = helper.createClientAnchor();
-        anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_AND_RESIZE);
+        anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
 
+        // English comment: Keep anchor to a single cell; final size is controlled by CTPicture ext (EMU).
         anchor.setCol1(colStart);
-        anchor.setCol2(colEndExclusive);
-
+        anchor.setCol2(colStart + 1);
         anchor.setRow1(rowStart);
-        anchor.setRow2(rowEndExclusive);
+        anchor.setRow2(rowStart + 1);
 
-        // English comment: Read image size (pixels) to compute EMU height
-        BufferedImage bi = ImageIO.read(new java.io.ByteArrayInputStream(imgBytes));
-        int imgWpx = bi.getWidth();
-        int imgHpx = bi.getHeight();
-        int imgWem = org.apache.poi.util.Units.pixelToEMU(imgWpx);
-        int imgHem = org.apache.poi.util.Units.pixelToEMU(imgHpx);
+        // English comment: cm -> EMU (1 cm = 360000 EMU)
+        int finalWem = (int) Math.round(targetWcm * 360000.0);
+        int finalHem = (int) Math.round(targetHcm * 360000.0);
 
-        // English comment: Banner (rowStart..rowEndExclusive-1) total height in EMU
+        // English comment: Vertically center within banner rows (rowStart..rowEndExclusive-1)
         int bannerHem = sumRowsHeightEmu(sh, rowStart, rowEndExclusive - 1);
-
         int dyTop = 0;
-        if (bannerHem > imgHem) {
-            dyTop = (bannerHem - imgHem) / 2;
-        }
+        if (bannerHem > finalHem) dyTop = (bannerHem - finalHem) / 2;
 
-        anchor.setDx1(0);
+        // English comment: Nudge right by dx1Emu (e.g., ~4 arrow presses)
+        anchor.setDx1(dx1Emu);
         anchor.setDy1(dyTop);
+        anchor.setDx2(0);
+        anchor.setDy2(0);
 
-        anchor.setDx2(imgWem);
-        anchor.setDy2(dyTop + imgHem);
+        org.apache.poi.xssf.usermodel.XSSFPicture pic =
+                (org.apache.poi.xssf.usermodel.XSSFPicture) drawing.createPicture(anchor, picIdx);
 
-        drawing.createPicture(anchor, picIdx);
+        // English comment: Force final size in EMU (exact cm sizing)
+        pic.getCTPicture().getSpPr().getXfrm().getExt().setCx(finalWem);
+        pic.getCTPicture().getSpPr().getXfrm().getExt().setCy(finalHem);
     }
 
-    static int getLastCol(TplKind kind) {
-        int methodFirst;
-        if (kind == TplKind.P35) methodFirst = 7;
-        else methodFirst = 5;
-        return methodFirst + 4;
+    static Sheet copyTopTemplateArea(
+            Workbook out,
+            int baseIdx,
+            String newSheetName,
+            int keepLastRow
+    ) {
+        // 1) Clone sheet (copies column widths, row heights, merged regions, images, drawings)
+        Sheet newSh = out.cloneSheet(baseIdx);
+
+        // 2) Rename
+        int newIdx = out.getSheetIndex(newSh);
+        out.setSheetName(newIdx, newSheetName);
+
+        // 3) Remove all rows below keepLastRow (from bottom to top)
+        int lastRow = newSh.getLastRowNum();
+        int r = lastRow;
+        while (r > keepLastRow) {
+            Row row = newSh.getRow(r);
+            if (row != null) newSh.removeRow(row);
+            r = r - 1;
+        }
+
+        // 4) Remove merged regions that are fully below keepLastRow,
+        //    and also merged regions that cross the boundary (to avoid weird overlaps)
+        removeMergedRegionsBelowOrCrossing(newSh, keepLastRow);
+
+        // 5) Remove pictures anchored below keepLastRow (optional but recommended)
+        //    If you want to keep all top pictures only.
+        removePicturesBelowRow(newSh, keepLastRow);
+
+        return newSh;
+    }
+
+    // English comment: Remove merged regions that are below or crossing keepLastRow.
+    static void removeMergedRegionsBelowOrCrossing(Sheet sh, int keepLastRow) {
+        List<Integer> toRemove = new ArrayList<>();
+        int i = 0;
+        while (i < sh.getNumMergedRegions()) {
+            CellRangeAddress ra = sh.getMergedRegion(i);
+
+            boolean fullyBelow = ra.getFirstRow() > keepLastRow;
+            boolean crossing = ra.getFirstRow() <= keepLastRow && ra.getLastRow() > keepLastRow;
+
+            if (fullyBelow || crossing) toRemove.add(i);
+            i = i + 1;
+        }
+
+        Collections.reverse(toRemove);
+        for (int idx : toRemove) sh.removeMergedRegion(idx);
+    }
+
+    // English comment: Remove pictures that start below keepLastRow (XSSF only).
+    static void removePicturesBelowRow(Sheet sh, int keepLastRow) {
+        if (!(sh instanceof org.apache.poi.xssf.usermodel.XSSFSheet)) return;
+
+        org.apache.poi.xssf.usermodel.XSSFSheet xs = (org.apache.poi.xssf.usermodel.XSSFSheet) sh;
+        org.apache.poi.xssf.usermodel.XSSFDrawing drawing = xs.getDrawingPatriarch();
+        if (drawing == null) return;
+
+        org.openxmlformats.schemas.drawingml.x2006.spreadsheetDrawing.CTDrawing ct = drawing.getCTDrawing();
+        if (ct == null) return;
+
+        // English comment: Remove anchors whose top row is below keepLastRow.
+        // English comment: Iterate from end to start to avoid index shift while removing.
+        int i;
+
+        i = ct.sizeOfTwoCellAnchorArray() - 1;
+        while (i >= 0) {
+            org.openxmlformats.schemas.drawingml.x2006.spreadsheetDrawing.CTTwoCellAnchor a = ct.getTwoCellAnchorArray(i);
+            int row1 = -1;
+            if (a != null && a.getFrom() != null) row1 = a.getFrom().getRow();
+            if (row1 > keepLastRow) ct.removeTwoCellAnchor(i);
+            i = i - 1;
+        }
+
+        i = ct.sizeOfOneCellAnchorArray() - 1;
+        while (i >= 0) {
+            org.openxmlformats.schemas.drawingml.x2006.spreadsheetDrawing.CTOneCellAnchor a = ct.getOneCellAnchorArray(i);
+            int row1 = -1;
+            if (a != null && a.getFrom() != null) row1 = a.getFrom().getRow();
+            if (row1 > keepLastRow) ct.removeOneCellAnchor(i);
+            i = i - 1;
+        }
+
+        i = ct.sizeOfAbsoluteAnchorArray() - 1;
+        while (i >= 0) {
+            // English comment: Absolute anchors are rare in templates; remove all to be safe if present.
+            ct.removeAbsoluteAnchor(i);
+            i = i - 1;
+        }
     }
 
     // New: Convert JSON -> EXCEL with explicit paths (for AllInOne)
@@ -1437,7 +1581,7 @@ public class JsonToExcelGeneral {
         }
 
         try (Workbook tpl = WorkbookFactory.create(Files.newInputStream(tplFile));
-             Workbook out = new XSSFWorkbook()) {
+             Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
 
             Styles S = Styles.build(out);
 
@@ -1452,14 +1596,31 @@ public class JsonToExcelGeneral {
                 else normalDays.add(d);
             }
 
-            // English comment: Week sheets (General ends on Saturday)
             int weekIndex = 1;
-            Sheet sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
-            int currentRow = initKidsCountBlockOnce(sh, S, tplKind);
 
+            String baseName = "25. 12월 둘째주";
 
-            int titleLastCol = getLastCol(tplKind);
-            currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+            // Keep only base sheet in template workbook
+            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
+                String nm = out.getSheetName(i);
+                if (!baseName.equals(nm)) out.removeSheetAt(i);
+            }
+
+            // Re-find baseIdx (it will be 0 after pruning)
+            int baseIdx = out.getSheetIndex(baseName);
+            if (baseIdx < 0) throw new IllegalStateException("Base sheet not found: " + baseName);
+
+            int DATA_START_ROW = 6;
+            int keepLastRow = DATA_START_ROW - 1;
+
+            Sheet sh = copyTopTemplateArea(
+                    out,
+                    baseIdx,
+                    makeWeekSheetName(ym, weekIndex),
+                    keepLastRow
+            );
+
+            int currentRow = DATA_START_ROW;
 
 
             for (int i = 0; i < normalDays.size(); i++) {
@@ -1476,30 +1637,39 @@ public class JsonToExcelGeneral {
                 if (isWeekEndGeneral(d.weekday)) {
                     if (i < normalDays.size() - 1) {
                         weekIndex = weekIndex + 1;
-                        sh = out.createSheet(makeWeekSheetName(ym, weekIndex));
-                        currentRow = initKidsCountBlockOnce(sh, S, tplKind);
+                        sh = copyTopTemplateArea(
+                                out,
+                                baseIdx,
+                                makeWeekSheetName(ym, weekIndex),
+                                keepLastRow
+                        );
 
-                        titleLastCol = getLastCol(tplKind);
-                        currentRow = createTopMergedBanner(sh, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+                        currentRow = DATA_START_ROW;
                     }
                 }
             }
 
             // English comment: Birthday dedicated sheet
             if (!birthdayDays.isEmpty()) {
-                Sheet bdaySheet = out.createSheet(makeBirthdaySheetName(ym));
-                int r = 0;
+                keepLastRow = DATA_START_ROW - 1;
 
-                titleLastCol = getLastCol(tplKind);
-                r = createTopMergedBanner(bdaySheet, S, currentRow, OUT_COL_OFFSET, titleLastCol + 1, tplKind);
+                Sheet bdaySheet = copyTopTemplateArea(
+                        out,
+                        baseIdx,
+                        makeBirthdaySheetName(ym),
+                        keepLastRow
+                );
+
+                int r = DATA_START_ROW;
+
                 for (DayPlan d : birthdayDays) {
-                    r = writeOneDay(
-                            bdaySheet, S, d, tpl, T, tplKind,
-                            titlePrefix, r, true
-                    );
-                    r = r + 4;
+                    r = writeOneDay(bdaySheet,S,d,tpl,T,tplKind,titlePrefix,r,true);   // isBirthday = true);
+                    r = r + 4; // Birthday는 하루 블록 간격을 넉넉히
                 }
             }
+
+            int baseIdx2 = out.getSheetIndex("25. 12월 둘째주");
+            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
             try (OutputStream os = Files.newOutputStream(outputXlsx)) {
                 out.write(os);
