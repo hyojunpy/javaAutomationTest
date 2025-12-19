@@ -177,9 +177,9 @@ public class JsonToExcelGeneral {
         final CellStyle headerKidsFill35;
 
         Styles(CellStyle title, CellStyle banner,CellStyle header,CellStyle headerNoFill, CellStyle bodyCenter,
-               CellStyle methodMerged, CellStyle num1, CellStyle dec1,
-               CellStyle labelAm, CellStyle labelLunch, CellStyle labelPm,
-               CellStyle kidsCnt12Fill, CellStyle kidsCnt35Fill, CellStyle headerKidsFill12,
+                CellStyle methodMerged, CellStyle num1, CellStyle dec1,
+                CellStyle labelAm, CellStyle labelLunch, CellStyle labelPm,
+                CellStyle kidsCnt12Fill, CellStyle kidsCnt35Fill, CellStyle headerKidsFill12,
                 CellStyle headerKidsFill35) {
             this.title = title; this.header = header; this.bodyCenter = bodyCenter;
             this.methodMerged = methodMerged; this.num1 = num1; this.dec1 = dec1;
@@ -899,9 +899,9 @@ public class JsonToExcelGeneral {
 
     /** Write one row with per-template formulas. */
     static void writeOneRow(TplKind kind, Row row, Styles S,
-                            String label, String menu, String ing,
-                            String p12, String p35, String t12, String t35,
-                            String method) {
+            String label, String menu, String ing,
+            String p12, String p35, String t12, String t35,
+            String method) {
         row.setHeightInPoints(18);
 
         Cell blankA = row.createCell(0);
@@ -1149,6 +1149,152 @@ public class JsonToExcelGeneral {
             return om.readValue(is, new TypeReference<List<DayPlan>>() {});
         }
     }
+
+
+    // English comment: Read plan list from JSON string (no intermediate JSON file)
+    static List<DayPlan> readPlanFromString(String jsonString) throws IOException {
+        if (jsonString == null) throw new IllegalArgumentException("jsonString is null");
+        ObjectMapper om = new ObjectMapper();
+        return om.readValue(jsonString, new TypeReference<List<DayPlan>>() {
+        });
+    }
+
+    public static Path convertFromJsonString(String jsonString, Path sourceNamePath, Path outputXlsx) throws Exception {
+        ZipSecureFile.setMinInflateRatio(0.0d);
+        ZipSecureFile.setMaxFileCount(20000);
+
+        // English comment: Validate inputs
+        if (jsonString == null) throw new IllegalArgumentException("jsonString is null");
+        if (sourceNamePath == null) throw new IllegalArgumentException("sourceNamePath is null");
+
+        if (outputXlsx == null) {
+            throw new IllegalArgumentException("outputXlsx is null");
+        }
+
+        YearMonth ym = inferYMFromJson(sourceNamePath);
+        String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
+
+        Path tplFile = resolveGeneralTemplate(sourceNamePath);
+        Path tplNewPath = resolveGeneralTemplateNew(sourceNamePath);
+        Path tplOldPath = resolveGeneralTemplateOld(sourceNamePath);
+
+        TplKind tplKind = detectTplKind(tplFile);
+        TemplateCols T = colsOf(tplKind);
+
+        List<DayPlan> plan = readPlanFromString(jsonString);
+
+        if (outputXlsx.getParent() != null) Files.createDirectories(outputXlsx.getParent());
+
+        Workbook tplNew = null;
+        Workbook tplOld = null;
+
+
+        try (Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
+
+            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
+            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
+
+
+            // English comment: Split normal days and birthday days
+            List<DayPlan> normalDays = new ArrayList<>();
+            List<DayPlan> birthdayDays = new ArrayList<>();
+
+            for (DayPlan d : plan) {
+                if (d == null) continue;
+                String ds = nz(d.dateStr).trim();
+                if (ds.equalsIgnoreCase("birthday")) birthdayDays.add(d);
+                else normalDays.add(d);
+            }
+
+            int weekIndex = 1;
+
+            String baseName = out.getSheetName(0);
+
+            // Keep only base sheet in template workbook
+            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
+                String nm = out.getSheetName(i);
+                if (!baseName.equals(nm)) out.removeSheetAt(i);
+            }
+
+            // Re-find baseIdx (it will be 0 after pruning)
+            int baseIdx = out.getSheetIndex(baseName);
+            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
+            Styles S = Styles.build(out);
+
+            int DATA_START_ROW;
+            if (tplKind == TplKind.P12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
+            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
+
+            int keepLastRow = DATA_START_ROW - 1;
+
+            Sheet sh = copyTopTemplateArea(
+                    out,
+                    baseIdx,
+                    makeWeekSheetName(ym, weekIndex),
+                    keepLastRow
+            );
+
+            int currentRow = DATA_START_ROW;
+
+
+            for (int i = 0; i < normalDays.size(); i++) {
+                DayPlan d = normalDays.get(i);
+                if (d == null) continue;
+                if (d.date == null) continue;
+
+                int beforeRow = currentRow;
+
+                currentRow = writeOneDay(sh, S, d, tplNew, tplOld, T, tplKind, titlePrefix, currentRow, false);
+
+                if (currentRow > beforeRow) {
+                    currentRow = currentRow + 1;
+                }
+
+                if (isWeekEndGeneral(d.weekday)) {
+                    if (i < normalDays.size() - 1) {
+                        weekIndex = weekIndex + 1;
+                        sh = copyTopTemplateArea(
+                                out,
+                                baseIdx,
+                                makeWeekSheetName(ym, weekIndex),
+                                keepLastRow
+                        );
+
+                        currentRow = DATA_START_ROW;
+                    }
+                }
+            }
+
+            // English comment: Birthday dedicated sheet
+            if (!birthdayDays.isEmpty()) {
+                keepLastRow = DATA_START_ROW - 1;
+
+                Sheet bdaySheet = copyTopTemplateArea(
+                        out,
+                        baseIdx,
+                        makeBirthdaySheetName(ym),
+                        keepLastRow
+                );
+
+                int r = DATA_START_ROW;
+
+                for (DayPlan d : birthdayDays) {
+                    r = writeOneDay(bdaySheet, S, d, tplNew, tplOld, T, tplKind, titlePrefix, r, true);
+                    r = r + 4; // Birthday는 하루 블록 간격을 넉넉히
+                }
+            }
+
+            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
+            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
+
+            try (OutputStream os = Files.newOutputStream(outputXlsx)) {
+                out.write(os);
+            }
+        }
+
+        return outputXlsx;
+    }
+
 
     static String normalizeForMatch(String s){
         if (s == null) return "";

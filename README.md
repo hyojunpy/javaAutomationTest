@@ -1,0 +1,1 @@
+jpackage --type exe --name Jungwha's_Converter --app-version 1.0.0 --input build/app --main-jar MyConverter.jar --main-class Main --dest dist --java-options "-Dfile.encoding=UTF-8" --win-console false

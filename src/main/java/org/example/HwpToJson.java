@@ -33,6 +33,7 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.io.File;
 
 public class HwpToJson {
     // ===== Input (default) =====
@@ -569,6 +570,49 @@ public class HwpToJson {
                 .writeValue(outputJsonPath.toFile(), list);
 
         return outputJsonPath;
+    }
+
+
+
+    // English comment: Convert HWP to JSON string without writing intermediate JSON file
+    public static String convertToJsonString(File hwpFile) throws Exception {
+        if (hwpFile == null) throw new IllegalArgumentException("hwpFile is null");
+        return convertToJsonString(hwpFile.toPath());
+    }
+
+    // English comment: Convert HWP to JSON string without writing intermediate JSON file
+    public static String convertToJsonString(Path inputHwpPath) throws Exception {
+        if (inputHwpPath == null) throw new IllegalArgumentException("inputHwpPath is null");
+
+        int[] ym = parseYearMonthFromFilename(inputHwpPath.getFileName().toString());
+        if (ym != null) { PARSED_YEAR = ym[0]; PARSED_MONTH = ym[1]; }
+        else { PARSED_YEAR = null; PARSED_MONTH = null; }
+
+        String inAbs = inputHwpPath.toAbsolutePath().toString();
+        HWP = HWPReader.fromFile(inAbs);
+
+        Map<Integer, DayPlan> byDate = new LinkedHashMap<>();
+
+        // English comment: Keep the original table scanning logic (same as convert())
+        for (int s = 0; s < HWP.getBodyText().getSectionList().size(); s++) {
+            Section sec = HWP.getBodyText().getSectionList().get(s);
+            for (int p = 0; p < sec.getParagraphCount(); p++) {
+                Paragraph para = sec.getParagraph(p);
+                if (para.getControlList() == null) continue;
+                for (Control c : para.getControlList()) {
+                    if (c.getType() != ControlType.Table) continue;
+                    ControlTable ct = (ControlTable) c;
+                    scanTable(ct, byDate, null);
+                }
+            }
+        }
+
+        List<DayPlan> list = new ArrayList<>(byDate.values());
+        list.sort(Comparator.comparingInt(dp -> dp.date));
+
+        return new ObjectMapper()
+                .enable(SerializationFeature.INDENT_OUTPUT)
+                .writeValueAsString(list);
     }
 
 }

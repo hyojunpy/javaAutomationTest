@@ -1043,6 +1043,113 @@ public class JsonToExcel {
         }
     }
 
+
+    // English comment: Read plan list from JSON string (no intermediate JSON file)
+    static List<DayPlan> readPlanFromString(String jsonString) throws IOException {
+        if (jsonString == null) throw new IllegalArgumentException("jsonString is null");
+        ObjectMapper om = new ObjectMapper();
+        return om.readValue(jsonString, new TypeReference<List<DayPlan>>() {
+        });
+    }
+
+    public static Path convertFromJsonString(String jsonString, Path sourceNamePath, Path outXlsxPath) throws Exception {
+        ZipSecureFile.setMinInflateRatio(0.0d);
+        ZipSecureFile.setMaxFileCount(20000);
+
+        // English comment: Validate inputs
+        if (jsonString == null) throw new IllegalArgumentException("jsonString is null");
+        if (sourceNamePath == null) throw new IllegalArgumentException("sourceNamePath is null");
+        if (outXlsxPath == null) throw new IllegalArgumentException("outXlsxPath is null");
+
+        YearMonth ym = inferYMFromJson(sourceNamePath);
+        String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
+
+        if (outXlsxPath.getParent() != null) Files.createDirectories(outXlsxPath.getParent());
+
+        OutputMode mode = inferModeFromJsonName(sourceNamePath);
+
+        Path baseTplPath = resolveTemplateBase(mode);
+        Path tplNewPath = resolveTemplateNew(mode);
+        Path tplOldPath = resolveTemplateOld(mode);
+
+        List<DayPlan> plan = readPlanFromString(jsonString);
+
+        Workbook tplNew = null;
+        Workbook tplOld = null;
+
+        try (Workbook out = WorkbookFactory.create(Files.newInputStream(baseTplPath))) {
+            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
+            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
+
+
+            // English comment: Keep only the first sheet as base, then rename to avoid collisions.
+            String baseName = out.getSheetName(0);
+            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
+                String nm = out.getSheetName(i);
+                if (!baseName.equals(nm)) out.removeSheetAt(i);
+            }
+            int baseIdx = 0;
+
+
+            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
+            Styles S = Styles.build(out);
+
+            // English comment: Use clone-based output sheet
+            int DATA_START_ROW;
+            if (mode == OutputMode.AGE12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
+            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
+
+            int keepLastRow = DATA_START_ROW - 1;
+
+            int weekNo = 1;
+            Sheet sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+            sh.setDefaultColumnStyle(0, S.blankA);
+
+            int nextRow = DATA_START_ROW;
+
+            int i = 0;
+            while (i < plan.size()) {
+                DayPlan d = plan.get(i);
+                if (d != null) {
+                    nextRow = writeOneDay(sh, S, d, tplNew, tplOld, titlePrefix, mode, nextRow);
+
+                    // English comment: Split sheet after Friday (end of week).
+                    if (isFriday(ym, d)) {
+
+                        // English comment: Finish current sheet cleanup.
+                        clearColumnAAllRows(sh, S);
+
+                        // English comment: Prepare next week sheet if there are remaining days.
+                        if (i + 1 < plan.size()) {
+                            weekNo = weekNo + 1;
+                            sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+                            sh.setDefaultColumnStyle(0, S.blankA);
+                            nextRow = DATA_START_ROW;
+                        }
+                    }
+                }
+                i = i + 1;
+            }
+
+// English comment: Ensure last sheet cleanup.
+            clearColumnAAllRows(sh, S);
+
+            // English comment: Remove base template sheet
+            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
+            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
+
+            try (OutputStream os = Files.newOutputStream(outXlsxPath)) {
+                out.write(os);
+            }
+        } finally {
+            if (tplNew != null) tplNew.close();
+            if (tplOld != null) tplOld.close();
+        }
+
+        return outXlsxPath;
+    }
+
+
     static Path resolveTemplateBase(OutputMode mode) throws Exception {
         Path appHome = getAppHomeDir();
         Path inputDir = appHome.resolve("input");
