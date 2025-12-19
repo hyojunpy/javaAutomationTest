@@ -38,7 +38,7 @@
 
     public class HwpToJsonGeneral {
         // ===== Default input path (used when no CLI arg is provided) =====
-        private static final String DEFAULT_IN = "input/2026년 1월 일반형(만3-5세).hwp";
+        private static final String DEFAULT_IN = "input/2026년 1월 일반형(만1-2세).hwp";
 
         private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         private static HWPFile HWP;

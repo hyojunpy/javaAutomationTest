@@ -6,11 +6,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.*;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -18,45 +22,40 @@ import java.util.regex.Pattern;
 
 /**
  * JSON(menu plan) + XLSX(template) -> XLSX(output)
- *
+ * <p>
  * Single sheet output:
- *  - Append day blocks vertically with 4 blank rows between blocks.
- *  - Global parameters on D2 (multiplier for 1~2) and D3 (multiplier for 3~5).
- *
+ * - Append day blocks vertically with 4 blank rows between blocks.
+ * - Global parameters on D2 (multiplier for 1~2) and D3 (multiplier for 3~5).
+ * <p>
  * Template columns (both 3-5 and 1-2 share base):
- *   B: Menu, C: Ingredient, D: 1-serving(1~2), E: 1-serving(3~5),
- *   F: Total(1~2), G: Total(3~5), H..L: Method
+ * B: Menu, C: Ingredient, D: 1-serving(1~2), E: 1-serving(3~5),
+ * F: Total(1~2), G: Total(3~5), H..L: Method
  */
 public class JsonToExcel {
 
     // ===== Input JSON (fallback only) =====
-    static final Path JSON_PLAN = Paths.get("output/25.12. 만1-2세 시간연장형.json");
+    static final Path JSON_PLAN = Paths.get("output/26.01. 만1-2세 시간연장형.json");
 
 
-    static final String TEMPLATE_35_NAME = "★2021.9~ 조리지시서(만3-5세 시간연장형).xlsx";
-    static final String TEMPLATE_12_NAME = "★2021.9~ 조리지시서(만1-2세 시간연장형).xlsx";
+    static final String TEMPLATE_35_NAME = "2021.9~2025 조리지시서(만3-5세 시간연장형).xlsx";
+    static final String TEMPLATE_12_NAME = "2021.9~2025 조리지시서(만1-2세 시간연장형).xlsx";
+    static final String TEMPLATE_35_NAME_2026 = "★2026~조리지시서(만3-5세 시간연장형).xlsx";
+    static final String TEMPLATE_12_NAME_2026 = "★2026~조리지시서(만1-2세 시간연장형).xlsx";
 
-    static final String[] HEADER_35 = {
-            "메뉴명","식재료명","1인 제공량(g)\n1~2세","1인 제공량(g)\n3~5세",
-            "총 발주량\n1~2세","총 발주량\n3~5세","만드는방법"
-    };
-    static final String[] HEADER_12 = {
-            "메뉴명","식재료명","1인 제공량(g)","총 발주량","만드는방법"
-    };
-
-    static final int COL_MENU   = 1;
-    static final int COL_ING    = 2;
-    static final int COL_P12    = 3;
-    static final int COL_P35    = 4;
-    static final int COL_T12    = 5;
-    static final int COL_T35    = 6;
+    static final int COL_MENU = 1;
+    static final int COL_ING = 2;
+    static final int COL_P12 = 3;
+    static final int COL_P35 = 4;
+    static final int COL_T12 = 5;
+    static final int COL_T35 = 6;
     static final int COL_METHOD = 7;
 
-    static final int GAP_ROWS = 4;
+    static final int GAP_ROWS = 2;
 
-    enum OutputMode { AGE12, AGE35 }
+    enum OutputMode {AGE12, AGE35}
 
-    static final Map<String,String> ALIAS = new HashMap<>();
+    static final Map<String, String> ALIAS = new HashMap<>();
+
     static {
         ALIAS.put("쇠고기", "소고기");
         ALIAS.put("계란", "달걀");
@@ -87,54 +86,86 @@ public class JsonToExcel {
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
 
         OutputMode mode = inferModeFromJsonName(jsonPlan);
-        Path chosenTemplate = openTemplateForMode(mode);
+
+        Path baseTplPath = resolveTemplateBase(mode);
+        Path tplNewPath = resolveTemplateNew(mode);
+        Path tplOldPath = resolveTemplateOld(mode);
 
         List<DayPlan> plan = readPlan(jsonPlan);
 
-        try (Workbook template = WorkbookFactory.create(Files.newInputStream(chosenTemplate));
-             Workbook out = new XSSFWorkbook()) {
+        Workbook tplNew = null;
+        Workbook tplOld = null;
+
+        try (Workbook out = WorkbookFactory.create(Files.newInputStream(baseTplPath))) {
+
+            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
+            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
+
+
+            // English comment: Keep only the first sheet as base, then rename to avoid collisions.
+            String baseName = out.getSheetName(0);
+            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
+                String nm = out.getSheetName(i);
+                if (!baseName.equals(nm)) out.removeSheetAt(i);
+            }
+            int baseIdx = 0;
+            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
+
+            // English comment: Use clone-based output sheet
+            int DATA_START_ROW;
+            if (mode == OutputMode.AGE12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
+            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
+
+            int keepLastRow = DATA_START_ROW - 1;
 
             Styles S = Styles.build(out);
 
-            Sheet sh = out.createSheet("전체");
-            int nextRow = 0;
+            int weekNo = 1;
+            Sheet sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+            sh.setDefaultColumnStyle(0, S.blankA);
 
-            for (DayPlan d : plan) {
-                if (d == null) continue;
-                nextRow = writeOneDay(sh, S, d, template, titlePrefix, mode, nextRow);
-                nextRow += GAP_ROWS;
+            int nextRow = DATA_START_ROW;
+
+            int i = 0;
+            while (i < plan.size()) {
+                DayPlan d = plan.get(i);
+                if (d != null) {
+                    nextRow = writeOneDay(sh, S, d, tplNew, tplOld, titlePrefix, mode, nextRow);
+
+                    // English comment: Split sheet after Friday (end of week).
+                    if (isFriday(ym, d)) {
+
+                        // English comment: Finish current sheet cleanup.
+                        clearColumnAAllRows(sh, S);
+
+                        // English comment: Prepare next week sheet if there are remaining days.
+                        if (i + 1 < plan.size()) {
+                            weekNo = weekNo + 1;
+                            sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+                            sh.setDefaultColumnStyle(0, S.blankA);
+                            nextRow = DATA_START_ROW;
+                        }
+                    }
+                }
+                i = i + 1;
             }
 
-            int[] widths = { 5000, 5000, 3500, 3500, 3500, 3500, 4500, 4500, 4500, 4500, 4500 };
-            for (int i = 0; i < widths.length; i++) sh.setColumnWidth(i, widths[i]);
+// English comment: Ensure last sheet cleanup.
+            clearColumnAAllRows(sh, S);
+
+            // English comment: Remove base template sheet
+            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
+            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
             try (OutputStream os = Files.newOutputStream(outPath)) {
                 out.write(os);
             }
+        } finally {
+            if (tplNew != null) tplNew.close();
+            if (tplOld != null) tplOld.close();
         }
 
         System.out.println("DONE → " + outPath.toAbsolutePath());
-    }
-
-    // English comment: Resolve template from installed app location (app.home/input) first
-    static Path openTemplateForMode(OutputMode mode) throws Exception {
-        Path appHome = getAppHomeDir();
-        Path inputDir = appHome.resolve("input");
-
-        Path candidate;
-        if (mode == OutputMode.AGE12) candidate = inputDir.resolve(TEMPLATE_12_NAME);
-        else candidate = inputDir.resolve(TEMPLATE_35_NAME);
-
-        if (Files.exists(candidate)) return candidate;
-
-        // Fallback: current working directory ./input
-        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
-        if (mode == OutputMode.AGE12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME);
-        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME);
-
-        if (Files.exists(candidate)) return candidate;
-
-        throw new IllegalStateException("Template not found: " + candidate.toAbsolutePath());
     }
 
     // English comment: Get app home directory for packaged app
@@ -153,63 +184,163 @@ public class JsonToExcel {
         return OutputMode.AGE35;
     }
 
-    static int writeOneDay(Sheet sh, Styles S, DayPlan d, Workbook template,
-                           String titlePrefix, OutputMode mode, int startRow) {
+    static int writeOneDay(Sheet sh, Styles S, DayPlan d, Workbook tplNew, Workbook tplOld, String titlePrefix, OutputMode mode, int startRow) {
+        sh.setDefaultColumnStyle(0, S.blankA);
+
+        boolean hasRealMenu = false;
+        if (d.menus != null) {
+            for (String m : d.menus) {
+                String t = nz(m).trim();
+                if (t.length() > 0 && !t.equals("없음")) hasRealMenu = true;
+            }
+        }
+        if (!hasRealMenu) return startRow;
+
         int r = startRow;
         int methodFirst;
-        if (mode == OutputMode.AGE35) methodFirst = 6;
-        else methodFirst = 4;
-
-        int methodLast  = methodFirst + 4;
+        // English comment: Method area should be H~L when output columns are shifted right by 1.
+        if (mode == OutputMode.AGE35) methodFirst = 7; // H
+        else methodFirst = 5;                          // F (AGE12)
+        int methodLast = methodFirst + 4;
         int lastColForBlock = methodLast;
+
 
         // Title
         Row tr = safeRow(sh, r++);
         int headerRowIndex = tr.getRowNum();
-        tr.setHeightInPoints(22);
-        Cell t0 = tr.createCell(0);
+        tr.setHeightInPoints(21);
+
+        Cell t0 = tr.createCell(1);
         t0.setCellValue(String.format("%s %d일 (%s)", titlePrefix, d.date, d.weekday));
         t0.setCellStyle(S.title);
-        CellRangeAddress titleMerge = new CellRangeAddress(tr.getRowNum(), tr.getRowNum(), 0, lastColForBlock);
+
+        CellRangeAddress titleMerge = new CellRangeAddress(tr.getRowNum(), tr.getRowNum(), 1, lastColForBlock);
         sh.addMergedRegion(titleMerge);
         setMergedBorder(sh, titleMerge, BorderStyle.THIN);
 
-        // Params
-        Row pr = safeRow(sh, r++);
-        Cell d2 = pr.createCell(3);
-        d2.setCellStyle(S.param);
-        d2.setCellValue(1.0);
-
-        Row pr2 = safeRow(sh, r++);
-        Cell d3 = pr2.createCell(3);
-        d3.setCellStyle(S.param);
-        d3.setCellValue(1.0);
+        Cell aTitle = safeCell(sh, tr.getRowNum(), 0);
+        aTitle.setCellValue("");
+        aTitle.setCellStyle(S.blankA);
 
         // Header
-        Row hr = safeRow(sh, r++);
-        if (mode == OutputMode.AGE35) {
-            for (int i = 0; i < HEADER_35.length; i++) {
-                Cell hc = hr.createCell(i);
-                hc.setCellValue(HEADER_35[i]);
-                hc.setCellStyle(S.header);
-            }
-        } else {
-            for (int i = 0; i < HEADER_12.length; i++) {
-                Cell hc = hr.createCell(i);
-                hc.setCellValue(HEADER_12[i]);
-                hc.setCellStyle(S.header);
-            }
+        // Header (2 rows)
+// English comment: Column map (0-based):
+// A: blank(0), B: menu(1), C: ingredient(2), D: p12(3), E: p35(4),
+// F: t12(5), G: t35(6), H~L: method(7~11)
+
+        Row hr1 = safeRow(sh, r++);
+        Row hr2 = safeRow(sh, r++);
+        removeHorizontalMergesInColumnA(sh, hr1.getRowNum(), hr2.getRowNum());
+
+
+        hr1.setHeightInPoints(18);
+        hr2.setHeightInPoints(18);
+
+        int colA = 0;
+        int colMenu = 1;
+        int colIng = 2;
+        int colD = 3;
+        int colE = 4;
+        int colF = 5;
+        int colG = 6;
+        int methodFirstCol = methodFirst;
+        int methodLastCol = methodLast;
+
+// English comment: Create base header cells
+        for (int c = colMenu; c <= methodLastCol; c++) {
+            Cell c1 = hr1.getCell(c);
+            if (c1 == null) c1 = hr1.createCell(c);
+            c1.setCellStyle(S.header);
+
+            Cell c2 = hr2.getCell(c);
+            if (c2 == null) c2 = hr2.createCell(c);
+            c2.setCellStyle(S.header);
+
         }
 
-        for (int c = methodFirst; c <= methodLast; c++) {
-            Cell hc = hr.getCell(c);
-            if (hc == null) hc = hr.createCell(c);
-            hc.setCellStyle(S.header);
+// A column: blank + vertical merge (2 rows)
+        Cell a1 = safeCell(sh, hr1.getRowNum(), colA);
+        a1.setCellValue("");
+        a1.setCellStyle(S.blankA);
+
+        Cell a2 = safeCell(sh, hr2.getRowNum(), colA);
+        a2.setCellValue("");
+        a2.setCellStyle(S.blankA);
+
+// Menu (B) vertical merge
+        Cell b1 = hr1.getCell(colMenu);
+        b1.setCellValue("메뉴명");
+        CellRangeAddress mB = new CellRangeAddress(hr1.getRowNum(), hr2.getRowNum(), colMenu, colMenu);
+        sh.addMergedRegion(mB);
+        setMergedBorder(sh, mB, BorderStyle.THIN);
+
+// Ingredient (C) vertical merge
+        Cell c1 = hr1.getCell(colIng);
+        c1.setCellValue("식재료명");
+        CellRangeAddress mC = new CellRangeAddress(hr1.getRowNum(), hr2.getRowNum(), colIng, colIng);
+        sh.addMergedRegion(mC);
+        setMergedBorder(sh, mC, BorderStyle.THIN);
+
+// Method (H~L) merge across columns AND 2 rows
+        Cell mh = hr1.getCell(methodFirstCol);
+        mh.setCellValue("만드는방법");
+        CellRangeAddress mMethod = new CellRangeAddress(hr1.getRowNum(), hr2.getRowNum(), methodFirstCol, methodLastCol);
+        sh.addMergedRegion(mMethod);
+        setMergedBorder(sh, mMethod, BorderStyle.THIN);
+
+// AGE35 vs AGE12 amount/total header layout
+        if (mode == OutputMode.AGE35) {
+            // Row1: D~E merged => "1인 제공량(g)"
+            Cell de = hr1.getCell(colD);
+            de.setCellValue("1인 제공량(g)");
+            CellRangeAddress mDE = new CellRangeAddress(hr1.getRowNum(), hr1.getRowNum(), colD, colE);
+            sh.addMergedRegion(mDE);
+            setMergedBorder(sh, mDE, BorderStyle.THIN);
+
+            // Row1: F~G merged => "총 발주량"
+            Cell fg = hr1.getCell(colF);
+            fg.setCellValue("총 발주량");
+            CellRangeAddress mFG = new CellRangeAddress(hr1.getRowNum(), hr1.getRowNum(), colF, colG);
+            sh.addMergedRegion(mFG);
+            setMergedBorder(sh, mFG, BorderStyle.THIN);
+
+            // Row2 labels + colors
+            Cell d2 = hr2.getCell(colD);
+            d2.setCellValue("1~2세");
+            d2.setCellStyle(S.header);
+            Cell e2 = hr2.getCell(colE);
+            e2.setCellValue("3~5세");
+            d2.setCellStyle(S.header);
+            Cell f2 = hr2.getCell(colF);
+            f2.setCellValue("1~2세");
+            f2.setCellStyle(S.headerSubYellow);
+            Cell g2 = hr2.getCell(colG);
+            g2.setCellValue("3~5세");
+            g2.setCellStyle(S.headerSubPink);
+        } else {
+            // AGE12: D column => per-serving, E column => total
+            Cell d1 = hr1.getCell(colD);
+            d1.setCellValue("1인 제공량(g)");
+            Cell e1 = hr1.getCell(colE);
+            e1.setCellValue("총 발주량");
+
+            Cell d2 = hr2.getCell(colD);
+            d2.setCellValue("1~2세");
+            d2.setCellStyle(S.header);
+            Cell e2 = hr2.getCell(colE);
+            e2.setCellValue("1~2세");
+            e2.setCellStyle(S.headerSubYellow);
+
+            // For AGE12, D and E are NOT vertically merged (they are 2-row headers)
+            // Other columns already merged above.
         }
-        CellRangeAddress headerMethod = new CellRangeAddress(hr.getRowNum(), hr.getRowNum(), methodFirst, methodLast);
-        sh.addMergedRegion(headerMethod);
-        setMergedBorder(sh, headerMethod, BorderStyle.THIN);
-        hr.setHeightInPoints(22);
+
+// English comment: Ensure borders on D/E/F/G cells (some are inside merged regions)
+        for (int cc = colD; cc <= colG; cc++) {
+            setBorders(safeCell(sh, hr1.getRowNum(), cc), BorderStyle.THIN);
+            setBorders(safeCell(sh, hr2.getRowNum(), cc), BorderStyle.THIN);
+        }
+
 
         // Menus
         List<String> head = new ArrayList<>();
@@ -224,7 +355,7 @@ public class JsonToExcel {
         orderedMenus.addAll(tail);
 
         for (String rawMenu : orderedMenus) {
-            SearchResult sr = findBlockInTemplateExactOnly(template, rawMenu);
+            SearchResult sr = findBlockInTemplateExactPreferNew(tplNew, tplOld, rawMenu);
             int blockStart = r;
 
             if (!sr.found) {
@@ -251,8 +382,7 @@ public class JsonToExcel {
                             menuCell = menuTitleToShow;
                             method = compactSpaces(b.method);
                         }
-                        writeDataRowWithFormulas(row, S,
-                                menuCell, it.ingredient, it.p12, it.p35, it.t12, it.t35, method, mode);
+                        writeDataRowWithFormulas(row, S, menuCell, it.ingredient, it.p12, it.p35, it.t12, it.t35, method, mode);
                     }
                 }
             }
@@ -260,14 +390,20 @@ public class JsonToExcel {
             int blockEnd = r - 1;
 
             // Merge menu column A
-            Cell aTop = safeCell(sh, blockStart, 0);
-            aTop.setCellStyle(S.bodyCenter);
+            Cell bTop = safeCell(sh, blockStart, 1);
+            bTop.setCellStyle(S.bodyCenter);
             if (blockEnd > blockStart) {
-                CellRangeAddress aMerge = new CellRangeAddress(blockStart, blockEnd, 0, 0);
-                sh.addMergedRegion(aMerge);
-                setMergedBorder(sh, aMerge, BorderStyle.THIN);
+                CellRangeAddress bMerge = new CellRangeAddress(blockStart, blockEnd, 1, 1);
+                sh.addMergedRegion(bMerge);
+                setMergedBorder(sh, bMerge, BorderStyle.THIN);
             } else {
-                setBorders(aTop, BorderStyle.THIN);
+                setBorders(bTop, BorderStyle.THIN);
+            }
+
+            for (int rr = blockStart; rr <= blockEnd; rr++) {
+                Cell a = safeCell(sh, rr, 0);
+                a.setCellValue("");
+                a.setCellStyle(S.blankA);
             }
 
             // Merge method area and apply styles
@@ -283,89 +419,143 @@ public class JsonToExcel {
 
             if (mode == OutputMode.AGE35) {
                 for (int br = blockStart; br <= blockEnd; br++) {
-                    for (int bc = 1; bc <= 5; bc++) setBorders(safeCell(sh, br, bc), BorderStyle.THIN);
-                    setBorders(safeCell(sh, br, 0), BorderStyle.THIN);
+                    // English comment: B~G should have borders (menu..totals)
+                    for (int bc = 1; bc <= 6; bc++) setBorders(safeCell(sh, br, bc), BorderStyle.THIN);
                 }
             } else {
                 for (int br = blockStart; br <= blockEnd; br++) {
-                    for (int bc = 1; bc <= 3; bc++) setBorders(safeCell(sh, br, bc), BorderStyle.THIN);
-                    setBorders(safeCell(sh, br, 0), BorderStyle.THIN);
+                    // English comment: B~E should have borders (menu..total)
+                    for (int bc = 1; bc <= 4; bc++) setBorders(safeCell(sh, br, bc), BorderStyle.THIN);
                 }
             }
         }
 
         int lastDataRow = r - 1;
         if (lastDataRow >= headerRowIndex) {
-            CellRangeAddress outer = new CellRangeAddress(headerRowIndex, lastDataRow, 0, lastColForBlock);
+            CellRangeAddress outer = new CellRangeAddress(headerRowIndex, lastDataRow, 1, lastColForBlock);
             setMergedBorder(sh, outer, BorderStyle.DOUBLE);
+
+            forceLeftOuterBorderDouble(sh, headerRowIndex, lastDataRow, 1);
+
+            // English comment: Column A must keep width but remain visually blank.
+            // English comment: Clear borders and force NO_FILL style to remove template residue.
+            int rr = headerRowIndex;
+            while (rr <= lastDataRow) {
+                Cell a = safeCell(sh, rr, 0);
+                a.setCellValue("");
+                a.setCellStyle(S.blankA);
+
+                CellStyle cs = sh.getWorkbook().createCellStyle();
+                cs.cloneStyleFrom(a.getCellStyle());
+                cs.setBorderTop(BorderStyle.NONE);
+                cs.setBorderBottom(BorderStyle.NONE);
+                cs.setBorderLeft(BorderStyle.NONE);
+                cs.setBorderRight(BorderStyle.NONE);
+                a.setCellStyle(cs);
+
+                rr = rr + 1;
+            }
         }
 
+        int gapStart = r;
+        for (int gr = 0; gr < GAP_ROWS; gr++) {
+            Row gapRow = safeRow(sh, gapStart + gr);
+            if (gr == 0) gapRow.setHeightInPoints(80.1f);
+
+            for (int cc = 0; cc <= lastColForBlock; cc++) {
+                Cell c = safeCell(sh, gapStart + gr, cc);
+                c.setCellValue("");
+                if (cc == 0) c.setCellStyle(S.blankA);
+                else c.setCellStyle(S.gapBlank); // 이 스타일은 "테두리 NONE + NO_FILL"로 만들어둔 걸 쓰기
+            }
+        }
+
+        // English comment: Put allergy banner INSIDE the GAP (first gap row).
+        addAllergyImageOnRow(sh, gapStart, 1, lastColForBlock);
+
+        r = r + GAP_ROWS;
         return r;
     }
 
-    static void writeDataRowWithFormulas(Row row, Styles S,
-                                         String menu, String ing,
-                                         String p12, String p35, String t12, String t35,
-                                         String method, OutputMode mode) {
+    static void writeDataRowWithFormulas(Row row, Styles S, String menu, String ing, String p12, String p35, String t12, String t35, String method, OutputMode mode) {
         int excelRow = row.getRowNum() + 1;
         row.setHeightInPoints(18);
 
-        Cell a = row.createCell(0);
-        a.setCellValue(nz(menu));
-        a.setCellStyle(S.bodyCenter);
+        // English comment: A column should stay blank
+        Cell colA = row.createCell(0);
+        colA.setCellValue("");
+        colA.setCellStyle(S.blankA);
 
-        Cell b = row.createCell(1);
-        b.setCellValue(nz(ing));
-        b.setCellStyle(S.bodyCenter);
+        // B: menu
+        Cell menuCell = row.createCell(1);
+        menuCell.setCellValue(nz(menu));
+        menuCell.setCellStyle(S.bodyCenter);
+
+        // C: ingredient
+        Cell ingCell = row.createCell(2);
+        ingCell.setCellValue(nz(ing));
+        ingCell.setCellStyle(S.bodyCenter);
 
         if (mode == OutputMode.AGE35) {
-            Cell d = row.createCell(3);
-            boolean dIsNum = trySetNumeric(d, p35);
-            if (!dIsNum) d.setCellValue(nz(p35));
-            d.setCellStyle(S.numGeneral);
-
-            Cell c = row.createCell(2);
-            c.setCellFormula(String.format("D%d*0.65", excelRow));
-
-            boolean forceOneDecimal = shouldForceOneDecimal(p35);
-            if (forceOneDecimal) c.setCellStyle(S.num1dec);
-            else c.setCellStyle(S.numGeneral);
-
+            // D: 1~2 (derived from E * 0.65)
+            // E: 3~5 (input)
             Cell e = row.createCell(4);
-            e.setCellFormula(String.format("C%d*$D$2", excelRow));
+            boolean eIsNum = trySetNumeric(e, p35);
+            if (!eIsNum) e.setCellValue(nz(p35));
             e.setCellStyle(S.numGeneral);
 
+            Cell d = row.createCell(3);
+            d.setCellFormula(String.format("E%d*0.65", excelRow));
+            boolean forceOneDecimal = shouldForceOneDecimal(p35);
+            if (forceOneDecimal) d.setCellStyle(S.num1dec);
+            else d.setCellStyle(S.numGeneral);
+
+            // F: total 1~2 (no param row -> just equal to D for now)
+            // F: total 1~2 (multiplier at $D$2)
             Cell f = row.createCell(5);
-            f.setCellFormula(String.format("D%d*$D$3", excelRow));
+            f.setCellFormula(String.format("D%d*$D$2", excelRow));
             f.setCellStyle(S.numGeneral);
 
+// G: total 3~5 (multiplier at $D$3)
             Cell g = row.createCell(6);
-            g.setCellValue(compactSpaces(nz(method)));
+            g.setCellFormula(String.format("E%d*$D$3", excelRow));
+            g.setCellStyle(S.numGeneral);
+
+            // H: method text (actual merge is handled outside)
+            Cell h = row.createCell(7);
+            h.setCellValue(compactSpaces(nz(method)));
+            h.setCellStyle(S.methodMerged);
+
         } else {
-            Cell c = row.createCell(2);
-            boolean cNum = trySetNumeric(c, p12);
-            if (!cNum) {
+            // AGE12
+            // D: 1~2 (input or derived)
+            Cell d = row.createCell(3);
+            boolean dNum = trySetNumeric(d, p12);
+            if (!dNum) {
                 Double p35val = parseNumericOrNull(p35);
                 if (p35val != null) {
                     double v = p35val * 0.65;
-                    c.setCellValue(v);
+                    d.setCellValue(v);
                     boolean forceOneDecimal = shouldForceOneDecimal(p35);
-                    if (forceOneDecimal) c.setCellStyle(S.num1dec);
-                    else c.setCellStyle(S.numGeneral);
+                    if (forceOneDecimal) d.setCellStyle(S.num1dec);
+                    else d.setCellStyle(S.numGeneral);
                 } else {
-                    c.setCellValue(nz(p12));
-                    c.setCellStyle(S.num1dec);
+                    d.setCellValue(nz(p12));
+                    d.setCellStyle(S.num1dec);
                 }
             } else {
-                c.setCellStyle(S.num1dec);
+                d.setCellStyle(S.num1dec);
             }
 
-            Cell d = row.createCell(3);
-            d.setCellFormula(String.format("C%d*$D$2", excelRow));
-            d.setCellStyle(S.numGeneral);
-
+            // E: total (no param row -> just equal to D for now)
             Cell e = row.createCell(4);
-            e.setCellValue(compactSpaces(nz(method)));
+            e.setCellFormula(String.format("D%d*$D$2", excelRow));
+            e.setCellStyle(S.numGeneral);
+
+            // F: method
+            Cell f = row.createCell(5);
+            f.setCellValue(compactSpaces(nz(method)));
+            f.setCellStyle(S.methodMerged);
         }
     }
 
@@ -381,13 +571,21 @@ public class JsonToExcel {
         final boolean found;
         final boolean matchedByExact;
         final Block block;
-        SearchResult(boolean f, boolean exact, Block b){ this.found = f; this.matchedByExact = exact; this.block = b; }
-        static SearchResult miss(){ return new SearchResult(false, false, null); }
+
+        SearchResult(boolean f, boolean exact, Block b) {
+            this.found = f;
+            this.matchedByExact = exact;
+            this.block = b;
+        }
+
+        static SearchResult miss() {
+            return new SearchResult(false, false, null);
+        }
     }
 
-    static SearchResult findBlockInTemplateExactOnly(Workbook wb, String menuRaw){
+    static SearchResult findBlockInTemplateExactOnly(Workbook wb, String menuRaw) {
         String keyExact = compactSpacesPreserveAll(applyAlias(menuRaw));
-        String keyNorm  = normalizeForMatch(keyExact);
+        String keyNorm = normalizeForMatch(keyExact);
 
         for (int s = wb.getNumberOfSheets() - 1; s >= 0; s--) {
             Sheet sh = wb.getSheetAt(s);
@@ -396,14 +594,17 @@ public class JsonToExcel {
             int r = 0;
             while (r <= lastRow) {
                 String cellMenu = readStringConsideringMerged(sh, r, COL_MENU);
-                if (isBlank(cellMenu)) { r++; continue; }
+                if (isBlank(cellMenu)) {
+                    r++;
+                    continue;
+                }
 
                 CellRangeAddress menuRange = findMergedRange(sh, r, COL_MENU);
                 int first = r;
                 int last = r;
                 if (menuRange != null) {
                     first = menuRange.getFirstRow();
-                    last  = menuRange.getLastRow();
+                    last = menuRange.getLastRow();
                 } else {
                     int rr = r + 1;
                     while (rr <= lastRow) {
@@ -415,10 +616,10 @@ public class JsonToExcel {
                 }
 
                 String cellExact = compactSpacesPreserveAll(cellMenu);
-                String cellNorm  = normalizeForMatch(cellExact);
+                String cellNorm = normalizeForMatch(cellExact);
 
                 if (cellExact.equals(keyExact)) return new SearchResult(true, true, readBlock(sh, first, last));
-                if (cellNorm.equals(keyNorm))  return new SearchResult(true, false, readBlock(sh, first, last));
+                if (cellNorm.equals(keyNorm)) return new SearchResult(true, false, readBlock(sh, first, last));
 
                 r = last + 1;
             }
@@ -426,13 +627,16 @@ public class JsonToExcel {
         return SearchResult.miss();
     }
 
-    static Block readBlock(Sheet sh, int first, int last){
+    static Block readBlock(Sheet sh, int first, int last) {
         String methodTop = "";
         outer:
         for (int rr = first; rr <= last; rr++) {
             for (int cc = COL_METHOD; cc <= COL_METHOD + 4; cc++) {
                 String v = readStringConsideringMerged(sh, rr, cc);
-                if (!isBlank(v)) { methodTop = v.trim(); break outer; }
+                if (!isBlank(v)) {
+                    methodTop = v.trim();
+                    break outer;
+                }
             }
         }
         List<Item> items = new ArrayList<>();
@@ -456,11 +660,11 @@ public class JsonToExcel {
         Block b = new Block();
         b.displayName = readStringConsideringMerged(sh, first, COL_MENU);
         b.method = nz(methodTop);
-        b.items  = items;
+        b.items = items;
         return b;
     }
 
-    static Path deriveOutXlsxPathFromJson(Path jsonPath, Path outDir){
+    static Path deriveOutXlsxPathFromJson(Path jsonPath, Path outDir) {
         String file = jsonPath.getFileName().toString();
         int dot = file.lastIndexOf('.');
         String stem = (dot > 0) ? file.substring(0, dot) : file;
@@ -468,7 +672,7 @@ public class JsonToExcel {
         return outDir.resolve(outBase + ".xlsx");
     }
 
-    static CellRangeAddress findMergedRange(Sheet sh, int r, int c){
+    static CellRangeAddress findMergedRange(Sheet sh, int r, int c) {
         for (int i = 0; i < sh.getNumMergedRegions(); i++) {
             CellRangeAddress ra = sh.getMergedRegion(i);
             if (ra.isInRange(r, c)) return ra;
@@ -476,16 +680,16 @@ public class JsonToExcel {
         return null;
     }
 
-    static String readStringConsideringMerged(Sheet sh, int r, int c){
+    static String readStringConsideringMerged(Sheet sh, int r, int c) {
         Cell cell = getMergedAnchorCell(sh, r, c);
         if (cell == null) return "";
         return getString(cell).trim();
     }
 
-    static Cell getMergedAnchorCell(Sheet sh, int r, int c){
-        for (int i=0;i<sh.getNumMergedRegions();i++){
+    static Cell getMergedAnchorCell(Sheet sh, int r, int c) {
+        for (int i = 0; i < sh.getNumMergedRegions(); i++) {
             CellRangeAddress ra = sh.getMergedRegion(i);
-            if (ra.isInRange(r,c)){
+            if (ra.isInRange(r, c)) {
                 Row topRow = sh.getRow(ra.getFirstRow());
                 if (topRow == null) return null;
                 return topRow.getCell(ra.getFirstColumn());
@@ -496,39 +700,38 @@ public class JsonToExcel {
         return row.getCell(c);
     }
 
-    static String getString(Cell cell){
+    static String getString(Cell cell) {
         if (cell == null) return "";
-        switch (cell.getCellType()){
-            case STRING:  return cell.getStringCellValue();
+        switch (cell.getCellType()) {
+            case STRING:
+                return cell.getStringCellValue();
             case NUMERIC:
                 if (DateUtil.isCellDateFormatted(cell)) return cell.getDateCellValue().toString();
                 double v = cell.getNumericCellValue();
                 long rnd = Math.round(v);
                 if (Math.abs(v - rnd) < 1e-9) return String.valueOf(rnd);
                 return String.valueOf(v);
-            case BOOLEAN: return String.valueOf(cell.getBooleanCellValue());
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
             case FORMULA:
-                try { return cell.getStringCellValue(); }
-                catch (Exception e) {
-                    try { return String.valueOf(cell.getNumericCellValue()); }
-                    catch (Exception ignore) { return ""; }
+                try {
+                    return cell.getStringCellValue();
+                } catch (Exception e) {
+                    try {
+                        return String.valueOf(cell.getNumericCellValue());
+                    } catch (Exception ignore) {
+                        return "";
+                    }
                 }
-            default: return "";
+            default:
+                return "";
         }
     }
 
     static boolean trySetNumeric(Cell c, String s) {
         if (isBlank(s)) return false;
         try {
-            String t = s
-                    .replace(",", "")
-                    .replace("\u00A0", "")
-                    .replaceAll("[\\u2000-\\u200B\\u202F\\u205F\\u3000]", "")
-                    .replace('．','.')
-                    .replace('。','.')
-                    .replace('･','.')
-                    .replace('·','.')
-                    .trim();
+            String t = s.replace(",", "").replace("\u00A0", "").replaceAll("[\\u2000-\\u200B\\u202F\\u205F\\u3000]", "").replace('．', '.').replace('。', '.').replace('･', '.').replace('·', '.').trim();
             t = t.replaceAll("[^0-9.\\-]", "");
             t = t.replaceAll("\\.(?=\\.)", "");
             t = t.replaceAll("\\.$", "");
@@ -537,21 +740,15 @@ public class JsonToExcel {
             double v = Double.parseDouble(t);
             c.setCellValue(v);
             return true;
-        } catch (Exception e) { return false; }
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     static Double parseNumericOrNull(String s) {
         if (isBlank(s)) return null;
         try {
-            String t = s
-                    .replace(",", "")
-                    .replace("\u00A0", "")
-                    .replaceAll("[\\u2000-\\u200B\\u202F\\u205F\\u3000]", "")
-                    .replace('．','.')
-                    .replace('。','.')
-                    .replace('･','.')
-                    .replace('·','.')
-                    .trim();
+            String t = s.replace(",", "").replace("\u00A0", "").replaceAll("[\\u2000-\\u200B\\u202F\\u205F\\u3000]", "").replace('．', '.').replace('。', '.').replace('･', '.').replace('·', '.').trim();
             t = t.replaceAll("[^0-9.\\-]", "");
             t = t.replaceAll("\\.(?=\\.)", "");
             t = t.replaceAll("\\.$", "");
@@ -579,7 +776,7 @@ public class JsonToExcel {
         org.apache.poi.ss.util.RegionUtil.setBorderRight(bs, rgn, sh);
     }
 
-    static Row safeRow(Sheet sh, int r){
+    static Row safeRow(Sheet sh, int r) {
         Row row = sh.getRow(r);
         if (row == null) row = sh.createRow(r);
         return row;
@@ -592,33 +789,34 @@ public class JsonToExcel {
         return cell;
     }
 
-    static boolean isBlank(String s){ return s == null || s.trim().isEmpty(); }
-    static String nz(String s){ return s == null ? "" : s; }
-
-    static String compactSpaces(String s){
-        if (s == null) return "";
-        return s.replace('\u00A0',' ')
-                .replaceAll("[ \\t]{2,}", " ")
-                .trim();
+    static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
     }
 
-    static String compactSpacesPreserveAll(String s){
-        if (s == null) return "";
-        return s.replace('\u00A0',' ')
-                .replaceAll("[ \\t]{2,}", " ")
-                .trim();
+    static String nz(String s) {
+        return s == null ? "" : s;
     }
 
-    static String applyAlias(String s){
+    static String compactSpaces(String s) {
+        if (s == null) return "";
+        return s.replace('\u00A0', ' ').replaceAll("[ \\t]{2,}", " ").trim();
+    }
+
+    static String compactSpacesPreserveAll(String s) {
+        if (s == null) return "";
+        return s.replace('\u00A0', ' ').replaceAll("[ \\t]{2,}", " ").trim();
+    }
+
+    static String applyAlias(String s) {
         if (s == null) return "";
         String t = s;
-        for (Map.Entry<String,String> e : ALIAS.entrySet()) {
+        for (Map.Entry<String, String> e : ALIAS.entrySet()) {
             t = t.replace(e.getKey(), e.getValue());
         }
         return t;
     }
 
-    static String normalizeForMatch(String s){
+    static String normalizeForMatch(String s) {
         if (s == null) return "";
         String t = applyAlias(s);
         t = t.replaceAll("[\u2460-\u2473①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]", "");
@@ -644,7 +842,7 @@ public class JsonToExcel {
         return YearMonth.of(2025, 12);
     }
 
-    static boolean isTailMenu(String s){
+    static boolean isTailMenu(String s) {
         if (s == null) return false;
         String t = s.replaceAll("[\u2460-\u2473①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]", "");
         t = t.replaceAll("\\s+", "");
@@ -656,23 +854,38 @@ public class JsonToExcel {
         public String weekday;
         public List<String> menus;
     }
-    static class Item { String ingredient, p12, p35, t12, t35; }
-    static class Block { String displayName; String method; List<Item> items = new ArrayList<>(); }
+
+    static class Item {
+        String ingredient, p12, p35, t12, t35;
+    }
+
+    static class Block {
+        String displayName;
+        String method;
+        List<Item> items = new ArrayList<>();
+    }
 
     static class Styles {
         final CellStyle title;
         final CellStyle header;
+        final CellStyle headerSubYellow;
+        final CellStyle headerSubPink;
         final CellStyle bodyCenter;
+        final CellStyle blankA;
+        final CellStyle gapBlank;
         final CellStyle methodMerged;
         final CellStyle num1dec;
         final CellStyle numGeneral;
         final CellStyle param;
 
-        Styles(CellStyle title, CellStyle header, CellStyle bodyCenter,
-               CellStyle methodMerged, CellStyle num1dec, CellStyle numGeneral, CellStyle param) {
+        Styles(CellStyle title, CellStyle header, CellStyle headerSubYellow, CellStyle headerSubPink, CellStyle bodyCenter, CellStyle blankA, CellStyle gapBlank, CellStyle methodMerged, CellStyle num1dec, CellStyle numGeneral, CellStyle param) {
             this.title = title;
             this.header = header;
+            this.headerSubYellow = headerSubYellow;
+            this.headerSubPink = headerSubPink;
             this.bodyCenter = bodyCenter;
+            this.blankA = blankA;
+            this.gapBlank = gapBlank;
             this.methodMerged = methodMerged;
             this.num1dec = num1dec;
             this.numGeneral = numGeneral;
@@ -682,14 +895,19 @@ public class JsonToExcel {
         static Styles build(Workbook wb) {
             DataFormat df = wb.createDataFormat();
 
-            Font bodyFont = wb.createFont();
-            bodyFont.setFontName("한컴산뜻돋움");
-            bodyFont.setFontHeightInPoints((short) 10);
+            Font titleFont = wb.createFont();
+            titleFont.setFontName("한컴산뜻돋움");
+            titleFont.setFontHeightInPoints((short) 14);
+            titleFont.setBold(true);
 
             Font headerFont = wb.createFont();
             headerFont.setFontName("한컴산뜻돋움");
-            headerFont.setFontHeightInPoints((short) 12);
+            headerFont.setFontHeightInPoints((short) 11);
             headerFont.setBold(true);
+
+            Font bodyFont = wb.createFont();
+            bodyFont.setFontName("한컴산뜻돋움");
+            bodyFont.setFontHeightInPoints((short) 10);
 
             CellStyle base = wb.createCellStyle();
             base.setBorderBottom(BorderStyle.THIN);
@@ -702,7 +920,7 @@ public class JsonToExcel {
             title.setAlignment(HorizontalAlignment.CENTER);
             title.setVerticalAlignment(VerticalAlignment.CENTER);
             title.setWrapText(true);
-            title.setFont(headerFont);
+            title.setFont(titleFont);
 
             CellStyle header = wb.createCellStyle();
             header.cloneStyleFrom(base);
@@ -711,12 +929,53 @@ public class JsonToExcel {
             header.setWrapText(true);
             header.setFont(headerFont);
 
+            CellStyle headerSubYellow = wb.createCellStyle();
+            headerSubYellow.cloneStyleFrom(header);
+            // English comment: Approx yellow for #FFFF9F
+
+
+            CellStyle headerSubPink = wb.createCellStyle();
+            headerSubPink.cloneStyleFrom(header);
+            // English comment: Approx pink for #FF9B9B
+
+
             CellStyle bodyCenter = wb.createCellStyle();
             bodyCenter.cloneStyleFrom(base);
             bodyCenter.setAlignment(HorizontalAlignment.CENTER);
             bodyCenter.setVerticalAlignment(VerticalAlignment.CENTER);
             bodyCenter.setWrapText(true);
             bodyCenter.setFont(bodyFont);
+
+            CellStyle blankA = wb.createCellStyle();
+            blankA.cloneStyleFrom(bodyCenter);
+
+// English comment: Column A must have NO borders always.
+            blankA.setBorderTop(BorderStyle.NONE);
+            blankA.setBorderBottom(BorderStyle.NONE);
+            blankA.setBorderLeft(BorderStyle.NONE);
+            blankA.setBorderRight(BorderStyle.NONE);
+
+// English comment: Force NO_FILL to wipe template column style residue.
+            blankA.setFillPattern(FillPatternType.NO_FILL);
+            blankA.setFillForegroundColor(IndexedColors.AUTOMATIC.getIndex());
+            blankA.setFillBackgroundColor(IndexedColors.AUTOMATIC.getIndex()); // English comment: extra safety
+            blankA.setIndention((short) 0);
+
+
+            CellStyle gapBlank = wb.createCellStyle();
+            gapBlank.cloneStyleFrom(bodyCenter);
+
+// English comment: NO borders for gap rows (prevents stray lines under gapTop row).
+            gapBlank.setBorderTop(BorderStyle.NONE);
+            gapBlank.setBorderBottom(BorderStyle.NONE);
+            gapBlank.setBorderLeft(BorderStyle.NONE);
+            gapBlank.setBorderRight(BorderStyle.NONE);
+
+// English comment: Keep it truly blank (no fill).
+            gapBlank.setFillPattern(FillPatternType.NO_FILL);
+            gapBlank.setFillForegroundColor(IndexedColors.AUTOMATIC.getIndex());
+            gapBlank.setFillBackgroundColor(IndexedColors.AUTOMATIC.getIndex());
+
 
             CellStyle methodMerged = wb.createCellStyle();
             methodMerged.cloneStyleFrom(base);
@@ -740,51 +999,513 @@ public class JsonToExcel {
             param.setDataFormat(df.getFormat("General"));
             param.setFont(bodyFont);
 
-            return new Styles(title, header, bodyCenter, methodMerged, num1dec, numGeneral, param);
+            boolean isXssf = wb instanceof XSSFWorkbook;
+
+            if (isXssf) {
+                // #DDEBF7
+                ((XSSFCellStyle) title).setFillForegroundColor(new XSSFColor(new java.awt.Color(0xDA, 0xEE, 0xF3), null));
+                title.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+                // #F2F2F2
+                ((XSSFCellStyle) header).setFillForegroundColor(new XSSFColor(new java.awt.Color(0xF2, 0xF2, 0xF2), null));
+                header.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+                // #FFFF9F
+                ((XSSFCellStyle) headerSubYellow).setFillForegroundColor(new XSSFColor(new java.awt.Color(0xFF, 0xFF, 0x9F), null));
+                headerSubYellow.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+                // #FF9B9B
+                ((XSSFCellStyle) headerSubPink).setFillForegroundColor(new XSSFColor(new java.awt.Color(0xFF, 0x9B, 0x9B), null));
+                headerSubPink.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            } else {
+                title.setFillForegroundColor(IndexedColors.PALE_BLUE.getIndex());
+                title.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+                header.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+                header.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+                headerSubYellow.setFillForegroundColor(IndexedColors.LIGHT_YELLOW.getIndex());
+                headerSubYellow.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+                headerSubPink.setFillForegroundColor(IndexedColors.ROSE.getIndex());
+                headerSubPink.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            }
+
+            return new Styles(title, header, headerSubYellow, headerSubPink, bodyCenter, blankA, gapBlank, methodMerged, num1dec, numGeneral, param);
         }
     }
 
     static List<DayPlan> readPlan(Path json) throws IOException {
         ObjectMapper om = new ObjectMapper();
         try (var is = Files.newInputStream(json)) {
-            return om.readValue(is, new TypeReference<List<DayPlan>>() {});
+            return om.readValue(is, new TypeReference<List<DayPlan>>() {
+            });
         }
     }
 
+    static Path resolveTemplateBase(OutputMode mode) throws Exception {
+        Path appHome = getAppHomeDir();
+        Path inputDir = appHome.resolve("input");
+
+        Path candidate;
+
+        // 1) app.home/input : prefer new
+        if (mode == OutputMode.AGE12) candidate = inputDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = inputDir.resolve(TEMPLATE_35_NAME_2026);
+        if (Files.exists(candidate)) return candidate;
+
+        // 2) app.home/input : fallback old
+        if (mode == OutputMode.AGE12) candidate = inputDir.resolve(TEMPLATE_12_NAME);
+        else candidate = inputDir.resolve(TEMPLATE_35_NAME);
+        if (Files.exists(candidate)) return candidate;
+
+        // 3) ./input : prefer new
+        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
+        if (mode == OutputMode.AGE12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME_2026);
+        if (Files.exists(candidate)) return candidate;
+
+        // 4) ./input : fallback old
+        if (mode == OutputMode.AGE12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME);
+        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME);
+        if (Files.exists(candidate)) return candidate;
+
+        throw new IllegalStateException("Template not found: " + candidate.toAbsolutePath());
+    }
+
+    // English comment: Resolve lookup "new" template (2026~) if exists
+    static Path resolveTemplateNew(OutputMode mode) throws Exception {
+        Path appHome = getAppHomeDir();
+        Path inputDir = appHome.resolve("input");
+
+        Path candidate;
+        if (mode == OutputMode.AGE12) candidate = inputDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = inputDir.resolve(TEMPLATE_35_NAME_2026);
+        if (Files.exists(candidate)) return candidate;
+
+        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
+        if (mode == OutputMode.AGE12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME_2026);
+        if (Files.exists(candidate)) return candidate;
+
+        return null;
+    }
+
+    // English comment: Resolve lookup "old" template if exists
+    static Path resolveTemplateOld(OutputMode mode) throws Exception {
+        Path appHome = getAppHomeDir();
+        Path inputDir = appHome.resolve("input");
+
+        Path candidate;
+        if (mode == OutputMode.AGE12) candidate = inputDir.resolve(TEMPLATE_12_NAME);
+        else candidate = inputDir.resolve(TEMPLATE_35_NAME);
+        if (Files.exists(candidate)) return candidate;
+
+        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
+        if (mode == OutputMode.AGE12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME);
+        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME);
+        if (Files.exists(candidate)) return candidate;
+
+        return null;
+    }
+
+    static SearchResult findBlockInTemplateExactPreferNew(Workbook tplNew, Workbook tplOld, String rawMenu) {
+        if (tplNew != null) {
+            SearchResult a = findBlockInTemplateExactOnly(tplNew, rawMenu);
+            if (a.found) return a;
+        }
+        if (tplOld != null) {
+            SearchResult b = findBlockInTemplateExactOnly(tplOld, rawMenu);
+            if (b.found) return b;
+        }
+        return SearchResult.miss();
+    }
+
+    static Sheet copyTopTemplateArea(Workbook out, int baseIdx, String newSheetName, int keepLastRow) {
+        // 1) Clone sheet (copies column widths, row heights, merged regions, images, drawings)
+        Sheet newSh = out.cloneSheet(baseIdx);
+
+        // 2) Rename
+        int newIdx = out.getSheetIndex(newSh);
+        String finalName = newSheetName;
+        int suffix = 1;
+
+        while (true) {
+            Sheet existing = out.getSheet(finalName);
+            if (existing == null) break;
+
+            int existingIdx = out.getSheetIndex(existing);
+            if (existingIdx == newIdx) break;
+
+            finalName = newSheetName + "_" + suffix;
+            suffix = suffix + 1;
+        }
+
+        out.setSheetName(newIdx, finalName);
+
+        // 3) Remove all rows below keepLastRow (from bottom to top)
+        int lastRow = newSh.getLastRowNum();
+        int r = lastRow;
+        while (r > keepLastRow) {
+            Row row = newSh.getRow(r);
+            if (row != null) newSh.removeRow(row);
+            r = r - 1;
+        }
+
+        // 4) Remove merged regions that are fully below keepLastRow,
+        //    and also merged regions that cross the boundary (to avoid weird overlaps)
+        removeMergedRegionsBelowOrCrossing(newSh, keepLastRow);
+
+        // 5) Remove pictures anchored below keepLastRow (optional but recommended)
+        //    If you want to keep all top pictures only.
+        removePicturesBelowRow(newSh, keepLastRow);
+
+        return newSh;
+    }
+
+    // English comment: Remove merged regions that are below or crossing keepLastRow.
+    static void removeMergedRegionsBelowOrCrossing(Sheet sh, int keepLastRow) {
+        List<Integer> toRemove = new ArrayList<>();
+        int i = 0;
+        while (i < sh.getNumMergedRegions()) {
+            CellRangeAddress ra = sh.getMergedRegion(i);
+
+            boolean fullyBelow = ra.getFirstRow() > keepLastRow;
+            boolean crossing = ra.getFirstRow() <= keepLastRow && ra.getLastRow() > keepLastRow;
+
+            if (fullyBelow || crossing) toRemove.add(i);
+            i = i + 1;
+        }
+
+        Collections.reverse(toRemove);
+        for (int idx : toRemove) sh.removeMergedRegion(idx);
+    }
+
+    // English comment: Remove pictures that start below keepLastRow (XSSF only).
+    static void removePicturesBelowRow(Sheet sh, int keepLastRow) {
+        if (!(sh instanceof org.apache.poi.xssf.usermodel.XSSFSheet)) return;
+
+        org.apache.poi.xssf.usermodel.XSSFSheet xs = (org.apache.poi.xssf.usermodel.XSSFSheet) sh;
+        org.apache.poi.xssf.usermodel.XSSFDrawing drawing = xs.getDrawingPatriarch();
+        if (drawing == null) return;
+
+        org.openxmlformats.schemas.drawingml.x2006.spreadsheetDrawing.CTDrawing ct = drawing.getCTDrawing();
+        if (ct == null) return;
+
+        // English comment: Remove anchors whose top row is below keepLastRow.
+        // English comment: Iterate from end to start to avoid index shift while removing.
+        int i;
+
+        i = ct.sizeOfTwoCellAnchorArray() - 1;
+        while (i >= 0) {
+            org.openxmlformats.schemas.drawingml.x2006.spreadsheetDrawing.CTTwoCellAnchor a = ct.getTwoCellAnchorArray(i);
+            int row1 = -1;
+            if (a != null && a.getFrom() != null) row1 = a.getFrom().getRow();
+            if (row1 > keepLastRow) ct.removeTwoCellAnchor(i);
+            i = i - 1;
+        }
+
+        i = ct.sizeOfOneCellAnchorArray() - 1;
+        while (i >= 0) {
+            org.openxmlformats.schemas.drawingml.x2006.spreadsheetDrawing.CTOneCellAnchor a = ct.getOneCellAnchorArray(i);
+            int row1 = -1;
+            if (a != null && a.getFrom() != null) row1 = a.getFrom().getRow();
+            if (row1 > keepLastRow) ct.removeOneCellAnchor(i);
+            i = i - 1;
+        }
+
+        i = ct.sizeOfAbsoluteAnchorArray() - 1;
+        while (i >= 0) {
+            // English comment: Absolute anchors are rare in templates; remove all to be safe if present.
+            ct.removeAbsoluteAnchor(i);
+            i = i - 1;
+        }
+    }
+
+    static void clearBordersInColumnA(Sheet sh, int firstRow, int lastRow) {
+        int rr = firstRow;
+        while (rr <= lastRow) {
+            Cell a = safeCell(sh, rr, 0);
+
+            CellStyle cs = sh.getWorkbook().createCellStyle();
+            cs.cloneStyleFrom(a.getCellStyle());
+
+            cs.setBorderTop(BorderStyle.NONE);
+            cs.setBorderBottom(BorderStyle.NONE);
+            cs.setBorderLeft(BorderStyle.NONE);
+            cs.setBorderRight(BorderStyle.NONE);
+
+            // English comment: Keep it truly blank (no fill).
+            cs.setFillPattern(FillPatternType.NO_FILL);
+            cs.setFillForegroundColor(IndexedColors.AUTOMATIC.getIndex());
+            cs.setFillBackgroundColor(IndexedColors.AUTOMATIC.getIndex());
+
+            a.setCellStyle(cs);
+            rr = rr + 1;
+        }
+    }
+
+    static void clearColumnAAllRows(Sheet sh, Styles S) {
+        int last = sh.getLastRowNum();
+        int r = 0;
+        while (r <= last) {
+            Row row = sh.getRow(r);
+            if (row == null) {
+                r = r + 1;
+                continue;
+            }
+
+            Cell a = row.getCell(0);
+            if (a == null) a = row.createCell(0);
+
+            a.setCellValue("");
+            a.setCellStyle(S.blankA);
+
+            // English comment: Remove any borders that leaked from merged/outer borders.
+            CellStyle cs = sh.getWorkbook().createCellStyle();
+            cs.cloneStyleFrom(a.getCellStyle());
+            cs.setBorderTop(BorderStyle.NONE);
+            cs.setBorderBottom(BorderStyle.NONE);
+            cs.setBorderLeft(BorderStyle.NONE);
+            cs.setBorderRight(BorderStyle.NONE);
+
+            // English comment: Extra safety - keep A column truly blank even if template had fills.
+            cs.setFillPattern(FillPatternType.NO_FILL);
+            cs.setFillForegroundColor(IndexedColors.AUTOMATIC.getIndex());
+            cs.setFillBackgroundColor(IndexedColors.AUTOMATIC.getIndex());
+
+            a.setCellStyle(cs);
+
+            r = r + 1;
+        }
+    }
+
+    static Path resolveAllergyImagePath() {
+        Path appHome = getAppHomeDir();
+        Path p1 = appHome.resolve("input").resolve("allergy.png");
+        if (Files.exists(p1)) return p1;
+
+        Path p2 = Paths.get("").toAbsolutePath().resolve("input").resolve("allergy.png");
+        if (Files.exists(p2)) return p2;
+
+        return null;
+    }
+
+    static void addAllergyImageOnRow(Sheet sh, int rowIndex, int firstCol, int lastCol) {
+        try {
+            Path imgPath = resolveAllergyImagePath();
+            if (imgPath == null) return;
+
+            byte[] imgBytes = Files.readAllBytes(imgPath);
+            int picIdx = sh.getWorkbook().addPicture(imgBytes, Workbook.PICTURE_TYPE_PNG);
+
+            Row imgRow = sh.getRow(rowIndex);
+            if (imgRow == null) imgRow = sh.createRow(rowIndex);
+
+            Drawing<?> drawing = sh.createDrawingPatriarch();
+            CreationHelper helper = sh.getWorkbook().getCreationHelper();
+
+            ClientAnchor anchor = helper.createClientAnchor();
+            anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
+
+            // English comment: Span the same width as the day table (B..LAST_COL).
+            anchor.setCol1(firstCol);
+            anchor.setCol2(lastCol + 1);   // exclusive
+            anchor.setRow1(rowIndex);
+            anchor.setRow2(rowIndex + 1);  // exclusive
+
+            anchor.setDx1(0);
+            anchor.setDy1(0);
+            anchor.setDx2(0);
+            anchor.setDy2(0);
+
+            org.apache.poi.xssf.usermodel.XSSFPicture pic =
+                    (org.apache.poi.xssf.usermodel.XSSFPicture) drawing.createPicture(anchor, picIdx);
+
+            // English comment: Fit image into the anchor cell range.
+            pic.resize(1.00);
+
+            clearBordersInColumnA(sh, rowIndex, rowIndex);
+
+        } catch (Exception ignore) {
+            // English comment: Ignore image errors to avoid breaking XLSX generation.
+        }
+    }
+
+
+    static void forceLeftOuterBorderDouble(Sheet sh, int firstRow, int lastRow, int leftCol) {
+        int rr = firstRow;
+        while (rr <= lastRow) {
+            Cell c = safeCell(sh, rr, leftCol);
+
+            CellStyle cs = sh.getWorkbook().createCellStyle();
+            cs.cloneStyleFrom(c.getCellStyle());
+
+            cs.setBorderLeft(BorderStyle.DOUBLE);
+
+            c.setCellStyle(cs);
+            rr = rr + 1;
+        }
+    }
+
+    static boolean isFriday(String weekday) {
+        if (weekday == null) return false;
+
+        String t = weekday.trim();
+        if (t.length() == 0) return false;
+
+        // English comment: Accept common Korean labels and also cases like "금(요일)".
+        if (t.contains("금")) return true;
+        if (t.toLowerCase(Locale.ROOT).contains("fri")) return true;
+
+        return false;
+    }
+
+    static boolean isFriday(YearMonth ym, DayPlan d) {
+        if (ym == null) return false;
+        if (d == null) return false;
+
+        // English comment: Prefer the provided weekday string if it clearly indicates Friday.
+        if (isFriday(d.weekday)) return true;
+
+        // English comment: If weekday is missing or unreliable, compute from YearMonth + day-of-month.
+        try {
+            LocalDate dt = ym.atDay(d.date);
+            DayOfWeek dow = dt.getDayOfWeek();
+            if (dow == DayOfWeek.FRIDAY) return true;
+        } catch (Exception ignore) {
+            // English comment: Ignore invalid dates (out of month range) safely.
+        }
+
+        return false;
+    }
+    static String buildWeekSheetName(YearMonth ym, int weekNo) {
+        int yy = ym.getYear() % 100;
+        int m = ym.getMonthValue();
+
+        // English comment: Week label in Korean ordinal form.
+        String wk;
+        if (weekNo == 1) wk = "첫째";
+        else if (weekNo == 2) wk = "둘째";
+        else if (weekNo == 3) wk = "셋째";
+        else if (weekNo == 4) wk = "넷째";
+        else if (weekNo == 5) wk = "다섯째";
+        else if (weekNo == 6) wk = "여섯째";
+        else wk = String.valueOf(weekNo) + "째";
+
+        // English comment: Format => "YY. M월 첫째주" (month without leading zero)
+        return String.format("%d. %d월 %s주", yy, m, wk);
+    }
+
+    static void removeHorizontalMergesInColumnA(Sheet sh, int row1, int row2) {
+        if (sh == null) return;
+
+        List<Integer> toRemove = new ArrayList<>();
+        int i = 0;
+        while (i < sh.getNumMergedRegions()) {
+            CellRangeAddress ra = sh.getMergedRegion(i);
+
+            boolean rowOverlap = ra.getFirstRow() <= row2 && ra.getLastRow() >= row1;
+            boolean includesA = ra.getFirstColumn() == 0;
+            boolean horizontal = ra.getLastColumn() > 0;
+
+            if (rowOverlap && includesA && horizontal) toRemove.add(i);
+
+            i = i + 1;
+        }
+
+        Collections.reverse(toRemove);
+        for (int idx : toRemove) sh.removeMergedRegion(idx);
+    }
+
     // New: JSON -> Excel with explicit paths
-    public static Path convert(Path jsonPath, Path outXlsxPath) throws Exception {
+    public static Path convert(Path jsonPlan, Path outXlsxPath) throws Exception {
         ZipSecureFile.setMinInflateRatio(0.0d);
         ZipSecureFile.setMaxFileCount(20000);
 
-        YearMonth ym = inferYMFromJson(jsonPath);
+        YearMonth ym = inferYMFromJson(jsonPlan);
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
 
         if (outXlsxPath.getParent() != null) Files.createDirectories(outXlsxPath.getParent());
 
-        OutputMode mode = inferModeFromJsonName(jsonPath);
-        Path chosenTemplate = openTemplateForMode(mode);
+        OutputMode mode = inferModeFromJsonName(jsonPlan);
 
-        List<DayPlan> plan = readPlan(jsonPath);
+        Path baseTplPath = resolveTemplateBase(mode);
+        Path tplNewPath = resolveTemplateNew(mode);
+        Path tplOldPath = resolveTemplateOld(mode);
 
-        try (Workbook template = WorkbookFactory.create(Files.newInputStream(chosenTemplate));
-             Workbook out = new XSSFWorkbook()) {
+        List<DayPlan> plan = readPlan(jsonPlan);
 
+        Workbook tplNew = null;
+        Workbook tplOld = null;
+
+        try (Workbook out = WorkbookFactory.create(Files.newInputStream(baseTplPath))) {
+            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
+            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
+
+
+            // English comment: Keep only the first sheet as base, then rename to avoid collisions.
+            String baseName = out.getSheetName(0);
+            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
+                String nm = out.getSheetName(i);
+                if (!baseName.equals(nm)) out.removeSheetAt(i);
+            }
+            int baseIdx = 0;
+
+
+            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
             Styles S = Styles.build(out);
-            Sheet sh = out.createSheet("전체");
 
-            int nextRow = 0;
-            for (DayPlan d : plan) {
-                if (d == null) continue;
-                nextRow = writeOneDay(sh, S, d, template, titlePrefix, mode, nextRow);
-                nextRow += GAP_ROWS;
+            // English comment: Use clone-based output sheet
+            int DATA_START_ROW;
+            if (mode == OutputMode.AGE12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
+            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
+
+            int keepLastRow = DATA_START_ROW - 1;
+
+            int weekNo = 1;
+            Sheet sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+            sh.setDefaultColumnStyle(0, S.blankA);
+
+            int nextRow = DATA_START_ROW;
+
+            int i = 0;
+            while (i < plan.size()) {
+                DayPlan d = plan.get(i);
+                if (d != null) {
+                    nextRow = writeOneDay(sh, S, d, tplNew, tplOld, titlePrefix, mode, nextRow);
+
+                    // English comment: Split sheet after Friday (end of week).
+                    if (isFriday(ym, d)) {
+
+                        // English comment: Finish current sheet cleanup.
+                        clearColumnAAllRows(sh, S);
+
+                        // English comment: Prepare next week sheet if there are remaining days.
+                        if (i + 1 < plan.size()) {
+                            weekNo = weekNo + 1;
+                            sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+                            sh.setDefaultColumnStyle(0, S.blankA);
+                            nextRow = DATA_START_ROW;
+                        }
+                    }
+                }
+                i = i + 1;
             }
 
-            int[] widths = { 5000, 5000, 3500, 3500, 3500, 3500, 4500, 4500, 4500, 4500, 4500 };
-            for (int i = 0; i < widths.length; i++) sh.setColumnWidth(i, widths[i]);
+// English comment: Ensure last sheet cleanup.
+            clearColumnAAllRows(sh, S);
+
+            // English comment: Remove base template sheet
+            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
+            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
             try (OutputStream os = Files.newOutputStream(outXlsxPath)) {
                 out.write(os);
             }
+        } finally {
+            if (tplNew != null) tplNew.close();
+            if (tplOld != null) tplOld.close();
         }
 
         return outXlsxPath;

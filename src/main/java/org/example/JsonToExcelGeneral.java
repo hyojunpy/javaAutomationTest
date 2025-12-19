@@ -43,8 +43,11 @@ public class JsonToExcelGeneral {
     static final Path JSON_PLAN = Paths.get("output/26.01. 만3-5세 일반형.json");
 
     // English comment: Template filenames (resolved under app.home/input first)
-    static final String TEMPLATE_12_NAME = "2022~ 2025 조리지시서(만1-2세 일반형).xlsx";
-    static final String TEMPLATE_35_NAME = "2022~ 2025 조리지시서(만3-5세 일반형).xlsx";
+    static final String TEMPLATE_12_NAME = "2022~2025 조리지시서(만1-2세 일반형).xlsx";
+    static final String TEMPLATE_35_NAME = "2022~2025 조리지시서(만3-5세 일반형).xlsx";
+
+    static final String TEMPLATE_12_NAME_2026 = "★2026~조리지시서(만1-2세 일반형).xlsx";
+    static final String TEMPLATE_35_NAME_2026 = "★2026~조리지시서(만3-5세 일반형).xlsx";
 
     /* ===== Headers ===== */
     static final String[] HEADER_12 = { "구분", "메뉴명", "식재료명",
@@ -72,8 +75,9 @@ public class JsonToExcelGeneral {
     static final int OUT_COL_OFFSET = 1;
 
     static String makeWeekSheetName(YearMonth ym, int weekIndex) {
+        // English comment: Month should not be zero-padded. Format: "26. 1월 첫째주"
         return String.format(
-                "%02d. %02d %s",
+                "%02d. %d월 %s",
                 ym.getYear() % 100,
                 ym.getMonthValue(),
                 weekNameKorean(weekIndex)
@@ -191,6 +195,11 @@ public class JsonToExcelGeneral {
         static Styles build(Workbook wb){
             DataFormat df = wb.createDataFormat();
 
+            Font titleFont = wb.createFont();
+            titleFont.setFontName("한컴산뜻돋움");
+            titleFont.setFontHeightInPoints((short) 14);
+            titleFont.setBold(true);
+
             Font bodyFont = wb.createFont();
             bodyFont.setFontName("한컴산뜻돋움");
             bodyFont.setFontHeightInPoints((short)10);
@@ -198,7 +207,7 @@ public class JsonToExcelGeneral {
             Font headerFont = wb.createFont();
             headerFont.setFontName("한컴산뜻돋움");
             headerFont.setBold(true);
-            headerFont.setFontHeightInPoints((short)12);
+            headerFont.setFontHeightInPoints((short)11);
 
             Font bannerFont = wb.createFont();
             bannerFont.setFontName("한컴산뜻돋움");
@@ -216,7 +225,7 @@ public class JsonToExcelGeneral {
             title.setAlignment(HorizontalAlignment.CENTER);
             title.setVerticalAlignment(VerticalAlignment.CENTER);
             title.setWrapText(true);
-            title.setFont(headerFont);
+            title.setFont(titleFont);
 
             title.setFillPattern(FillPatternType.SOLID_FOREGROUND);
             if (wb instanceof XSSFWorkbook) {
@@ -335,6 +344,8 @@ public class JsonToExcelGeneral {
 
         // English comment: Resolve template under app.home/input first, then fallback to ./input
         Path tplFile = resolveGeneralTemplate(jsonPlan);
+        Path tplNewPath = resolveGeneralTemplateNew(jsonPlan);
+        Path tplOldPath = resolveGeneralTemplateOld(jsonPlan);
 
         TplKind tplKind = detectTplKind(tplFile);
         TemplateCols T = colsOf(tplKind);
@@ -343,10 +354,15 @@ public class JsonToExcelGeneral {
 
         if (outXlsx.getParent() != null) Files.createDirectories(outXlsx.getParent());
 
-        try (Workbook tpl = WorkbookFactory.create(Files.newInputStream(tplFile));
-             Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
+        Workbook tplNew = null;
+        Workbook tplOld = null;
 
-            Styles S = Styles.build(out);
+
+        try (Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
+
+            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
+            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
+
 
             // English comment: Split normal days and birthday days
             List<DayPlan> normalDays = new ArrayList<>();
@@ -360,7 +376,7 @@ public class JsonToExcelGeneral {
             }
             int weekIndex = 1;
 
-            String baseName = "25. 12월 둘째주";
+            String baseName = out.getSheetName(0);
 
             // Keep only base sheet in template workbook
             for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
@@ -370,9 +386,13 @@ public class JsonToExcelGeneral {
 
             // Re-find baseIdx (it will be 0 after pruning)
             int baseIdx = out.getSheetIndex(baseName);
-            if (baseIdx < 0) throw new IllegalStateException("Base sheet not found: " + baseName);
+            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
+            Styles S = Styles.build(out);
 
-            int DATA_START_ROW = 6;
+            int DATA_START_ROW;
+            if (tplKind == TplKind.P12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
+            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
+
             int keepLastRow = DATA_START_ROW - 1;
 
             Sheet sh = copyTopTemplateArea(
@@ -389,8 +409,13 @@ public class JsonToExcelGeneral {
                 if (d == null) continue;
                 if (d.date == null) continue;
 
-                currentRow = writeOneDay(sh, S, d, tpl, T, tplKind, titlePrefix, currentRow, false);
-                currentRow = currentRow + 2;
+                int beforeRow = currentRow;
+
+                currentRow = writeOneDay(sh, S, d, tplNew, tplOld, T, tplKind, titlePrefix, currentRow, false);
+
+                if (currentRow > beforeRow) {
+                    currentRow = currentRow + 1;
+                }
 
 
                 if (isWeekEndGeneral(d.weekday)) {
@@ -423,18 +448,22 @@ public class JsonToExcelGeneral {
                 int r = DATA_START_ROW;
 
                 for (DayPlan d : birthdayDays) {
-                    r = writeOneDay(bdaySheet,S,d,tpl,T,tplKind,titlePrefix,r,true);   // isBirthday = true);
+                    r = writeOneDay(bdaySheet, S, d, tplNew, tplOld, T, tplKind, titlePrefix, r, true);
                     r = r + 4; // Birthday는 하루 블록 간격을 넉넉히
                 }
             }
 
-            int baseIdx2 = out.getSheetIndex("25. 12월 둘째주");
+            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
             if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
             try (OutputStream os = Files.newOutputStream(outXlsx)) {
                 out.write(os);
             }
 
+        }finally {
+            // English comment: Close lookup workbooks if created
+            if (tplNew != null) tplNew.close();
+            if (tplOld != null) tplOld.close();
         }
 
         System.out.println("DONE → " + outXlsx.toAbsolutePath());
@@ -449,6 +478,11 @@ public class JsonToExcelGeneral {
         Path inputDir = appHome.resolve("input");
         Path candidate;
 
+        if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = inputDir.resolve(TEMPLATE_35_NAME_2026);
+
+        if (Files.exists(candidate)) return candidate;
+
         if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME);
         else candidate = inputDir.resolve(TEMPLATE_35_NAME);
 
@@ -456,12 +490,63 @@ public class JsonToExcelGeneral {
 
         // Fallback: current working directory ./input
         Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
+        // English comment: Prefer 2026~ template if exists, otherwise fallback to 2022~2025
+        if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME_2026);
+
+        if (Files.exists(candidate)) return candidate;
+
         if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME);
         else candidate = fallbackDir.resolve(TEMPLATE_35_NAME);
 
         if (Files.exists(candidate)) return candidate;
 
+
         throw new IllegalStateException("Template not found: " + candidate.toAbsolutePath());
+    }
+
+    static Path resolveGeneralTemplateNew(Path jsonPlan) throws Exception {
+        String jsonName = jsonPlan.getFileName().toString();
+        boolean is12 = jsonName.contains("만1-2");
+
+        Path appHome = getAppHomeDir();
+        Path inputDir = appHome.resolve("input");
+
+        Path candidate;
+        if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = inputDir.resolve(TEMPLATE_35_NAME_2026);
+
+        if (Files.exists(candidate)) return candidate;
+
+        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
+        if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME_2026);
+        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME_2026);
+
+        if (Files.exists(candidate)) return candidate;
+
+        return null;
+    }
+
+    static Path resolveGeneralTemplateOld(Path jsonPlan) throws Exception {
+        String jsonName = jsonPlan.getFileName().toString();
+        boolean is12 = jsonName.contains("만1-2");
+
+        Path appHome = getAppHomeDir();
+        Path inputDir = appHome.resolve("input");
+
+        Path candidate;
+        if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME);
+        else candidate = inputDir.resolve(TEMPLATE_35_NAME);
+
+        if (Files.exists(candidate)) return candidate;
+
+        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
+        if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME);
+        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME);
+
+        if (Files.exists(candidate)) return candidate;
+
+        return null;
     }
 
     // English comment: Get app home directory for packaged app
@@ -475,8 +560,8 @@ public class JsonToExcelGeneral {
 
     /* ===== One day block (stacked by rows) ===== */
     static int writeOneDay(Sheet sh, Styles S, DayPlan d,
-                           Workbook template, TemplateCols T, TplKind kind,
-                           String titlePrefix, int startRow, boolean isBirthday) {
+            Workbook tplNew, Workbook tplOld, TemplateCols T, TplKind kind,
+            String titlePrefix, int startRow, boolean isBirthday) {
 
         int METHOD_FIRST;
         if (kind == TplKind.P35) METHOD_FIRST = 7 + OUT_COL_OFFSET;
@@ -489,9 +574,50 @@ public class JsonToExcelGeneral {
 
         int r = startRow;
 
+        List<String> am = new ArrayList<>();
+        List<String> lunchOrig = new ArrayList<>();
+
+        if (d.menus != null && !d.menus.isEmpty()) {
+            int totalMenus = d.menus.size();
+            int morningCnt;
+
+            if (d.morningCount != null && d.morningCount > 0) morningCnt = d.morningCount;
+            else morningCnt = 1;
+
+            if (morningCnt > totalMenus) morningCnt = totalMenus;
+
+            int i = 0;
+            while (i < morningCnt) { am.add(d.menus.get(i)); i = i + 1; }
+            while (i < totalMenus) { lunchOrig.add(d.menus.get(i)); i = i + 1; }
+        }
+
+        List<String> pm;
+        if (d.pmDesert == null) pm = new ArrayList<>();
+        else pm = d.pmDesert;
+
+        // Move kimchi to bottom of lunch
+        List<String> lunchMain = new ArrayList<>();
+        List<String> lunchKimchi = new ArrayList<>();
+        for (String m : lunchOrig) {
+            if (isKimchi(m)) lunchKimchi.add(m);
+            else lunchMain.add(m);
+        }
+        List<String> lunch = new ArrayList<>();
+        lunch.addAll(lunchMain);
+        lunch.addAll(lunchKimchi);
+
+        // Dedup consecutive identical menus
+        am    = compressConsecutive(am);
+        lunch = compressConsecutive(lunch);
+        pm    = compressConsecutive(pm);
+
+        if (am.isEmpty() && lunch.isEmpty() && pm.isEmpty()) {
+            return startRow;
+        }
+
         // Title
         Row tr = sh.createRow(r++);
-        tr.setHeightInPoints(22);
+        tr.setHeightInPoints(21);
         Cell t0 = tr.createCell(OUT_COL_OFFSET);
 
         String titleText;
@@ -504,6 +630,8 @@ public class JsonToExcelGeneral {
 
         CellRangeAddress titleOuter = new CellRangeAddress(tr.getRowNum(), tr.getRowNum(), OUT_COL_OFFSET, LAST_COL);
         setMergedBorder(sh, titleOuter, BorderStyle.DOUBLE);
+
+        org.apache.poi.ss.util.RegionUtil.setBorderBottom(BorderStyle.THIN, titleOuter, sh);
 
         // Header
         int headerRowIndex;
@@ -525,7 +653,6 @@ public class JsonToExcelGeneral {
             int colF = 4 + OUT_COL_OFFSET; // 총 발주량(요청상 top blank)
             int methodFirst = METHOD_FIRST;
             int methodLast  = LAST_COL;
-
             // --- Top row labels ---
             Cell b1 = hrTop.createCell(colB); b1.setCellValue("구분");     b1.setCellStyle(S.header);
             Cell c1 = hrTop.createCell(colC); c1.setCellValue("메뉴명");   c1.setCellStyle(S.header);
@@ -565,8 +692,8 @@ public class JsonToExcelGeneral {
             Row hrBot = sh.createRow(r++);
             headerRowIndex = hrTop.getRowNum();
 
-            hrTop.setHeightInPoints(22);
-            hrBot.setHeightInPoints(22);
+            hrTop.setHeightInPoints(18);
+            hrBot.setHeightInPoints(18);
 
             // Column mapping with OUT_COL_OFFSET (A blank)
             int colB = 0 + OUT_COL_OFFSET; // 구분
@@ -623,42 +750,6 @@ public class JsonToExcelGeneral {
         }
 
         // Split sections using morningCount
-        List<String> am = new ArrayList<>();
-        List<String> lunchOrig = new ArrayList<>();
-
-        if (d.menus != null && !d.menus.isEmpty()) {
-            int totalMenus = d.menus.size();
-            int morningCnt;
-
-            if (d.morningCount != null && d.morningCount > 0) morningCnt = d.morningCount;
-            else morningCnt = 1;
-
-            if (morningCnt > totalMenus) morningCnt = totalMenus;
-
-            int i = 0;
-            while (i < morningCnt) { am.add(d.menus.get(i)); i = i + 1; }
-            while (i < totalMenus) { lunchOrig.add(d.menus.get(i)); i = i + 1; }
-        }
-
-        List<String> pm;
-        if (d.pmDesert == null) pm = new ArrayList<>();
-        else pm = d.pmDesert;
-
-        // Move kimchi to bottom of lunch
-        List<String> lunchMain = new ArrayList<>();
-        List<String> lunchKimchi = new ArrayList<>();
-        for (String m : lunchOrig) {
-            if (isKimchi(m)) lunchKimchi.add(m);
-            else lunchMain.add(m);
-        }
-        List<String> lunch = new ArrayList<>();
-        lunch.addAll(lunchMain);
-        lunch.addAll(lunchKimchi);
-
-        // Dedup consecutive identical menus
-        am    = compressConsecutive(am);
-        lunch = compressConsecutive(lunch);
-        pm    = compressConsecutive(pm);
 
         // 오전간식
         if (!am.isEmpty()) {
@@ -666,7 +757,7 @@ public class JsonToExcelGeneral {
             for (int i = 0; i < am.size(); i++) {
                 String label = "";
                 if (i == 0) label = "오전간식";
-                r = writeMenuBlock(sh, S, template, T, kind, r, label, am.get(i));
+                r = writeMenuBlock(sh, S, tplNew, tplOld, T, kind, r, label, am.get(i));
             }
             mergeLabel(sh, startRowBlock, r - 1, 0 + OUT_COL_OFFSET);
         }
@@ -677,7 +768,7 @@ public class JsonToExcelGeneral {
             for (int i = 0; i < lunch.size(); i++) {
                 String label = "";
                 if (i == 0) label = "점심";
-                r = writeMenuBlock(sh, S, template, T, kind, r, label, lunch.get(i));
+                r = writeMenuBlock(sh, S, tplNew, tplOld, T, kind, r, label, lunch.get(i));
             }
             mergeLabel(sh, startRowBlock, r - 1, 0 + OUT_COL_OFFSET);
         }
@@ -688,7 +779,8 @@ public class JsonToExcelGeneral {
             for (int i = 0; i < pm.size(); i++) {
                 String label = "";
                 if (i == 0) label = "오후간식";
-                r = writeMenuBlock(sh, S, template, T, kind, r, label, pm.get(i));
+                r = writeMenuBlock(sh, S, tplNew, tplOld, T, kind, r, label, pm.get(i));
+
             }
             mergeLabel(sh, startRowBlock, r - 1, 0 + OUT_COL_OFFSET);
         }
@@ -698,77 +790,24 @@ public class JsonToExcelGeneral {
         if (lastDataRow >= titleRowIndex) {
             CellRangeAddress outer = new CellRangeAddress(titleRowIndex, lastDataRow, 0, LAST_COL);
             setMergedBorder(sh, outer, BorderStyle.DOUBLE);
+
+            forceLeftOuterBorderDoubleAll(sh, titleRowIndex, lastDataRow, 1);
         }
-
-        int[] widths;
-        if (kind == TplKind.P35) widths = widths35;
-        else widths = widths12;
-
-//        for (int c = 0; c <= LAST_COL; c++) {
-//            if (c >= 3) {
-//                sh.setColumnWidth(c, (int) Math.round(8.38 * 256));
-//            } else {
-//                if (c < widths.length) sh.setColumnWidth(c, widths[c]);
-//            }
-//        }
-//
-//        sh.setColumnWidth(OUT_COL_OFFSET, (int) Math.round(8.3 * 256));
 
         clearBordersInColumnA(sh, startRow, r - 1);
 
-//        Row gap = sh.getRow(r);
-//        if (gap == null) gap = sh.createRow(r);
-//        gap.setHeightInPoints(80.1f);
-//
-//        try {
-//            // TODO: set your image path (per day or fixed)
-//            Path imgPath = Paths.get("input/allergy.png"); // example
-//            if (Files.exists(imgPath)) {
-//
-//                byte[] imgBytes = Files.readAllBytes(imgPath);
-//
-//                int pictureType = Workbook.PICTURE_TYPE_PNG; // change if JPG
-//                int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
-//
-//                Drawing<?> drawing = sh.createDrawingPatriarch();
-//                CreationHelper helper = sh.getWorkbook().getCreationHelper();
-//
-//                ClientAnchor anchor = helper.createClientAnchor();
-//                anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
-//
-//                int gapRowNum = r; // this is the row we just created for spacing
-//
-//                // Same width as title: from OUT_COL_OFFSET to LAST_COL
-//                anchor.setCol1(OUT_COL_OFFSET);
-//                anchor.setCol2(LAST_COL + 1); // Excel uses exclusive end column
-//
-//                // Same height as the gap row (one row)
-//                anchor.setRow1(gapRowNum);
-//                anchor.setRow2(gapRowNum + 1); // exclusive end row
-//
-//                // Full cell area
-//                anchor.setDx1(0);
-//                anchor.setDy1(0);
-//                anchor.setDx2(0);
-//                anchor.setDy2(0);
-//
-//                drawing.createPicture(anchor, picIdx);
-//            }
-//        } catch (Exception ignore) {
-//            // English comment: Ignore image errors to avoid breaking XLSX generation
-//        }
-
+        r = appendAllergyImageUnderDay(sh, r, OUT_COL_OFFSET, LAST_COL, kind);
 
         return r;
     }
 
     /** Write one menu block (ingredients rows + method merge). */
-    static int writeMenuBlock(Sheet sh, Styles S, Workbook tpl, TemplateCols T, TplKind kind,
-                              int r, String label, String rawMenu) {
+    static int writeMenuBlock(Sheet sh, Styles S, Workbook tplNew, Workbook tplOld, TemplateCols T, TplKind kind,
+            int r, String label, String rawMenu) {
 
         int partStart = r;
 
-        Optional<Block> found = findBlockInTemplateExact(tpl, rawMenu, T);
+        Optional<Block> found = findBlockInTemplateExactPreferNew(tplNew, tplOld, rawMenu, T);
 
         if (found.isEmpty() || found.get().items.isEmpty()) {
             Row row = sh.createRow(r++);
@@ -966,6 +1005,24 @@ public class JsonToExcelGeneral {
         return Optional.empty();
     }
 
+    static Optional<Block> findBlockInTemplateExactPreferNew(
+            Workbook tplNew,
+            Workbook tplOld,
+            String menuRaw,
+            TemplateCols T
+    ) {
+        // English comment: Try 2026 template first, then fallback to 2022~2025
+        if (tplNew != null) {
+            Optional<Block> a = findBlockInTemplateExact(tplNew, menuRaw, T);
+            if (a.isPresent()) return a;
+        }
+        if (tplOld != null) {
+            Optional<Block> b = findBlockInTemplateExact(tplOld, menuRaw, T);
+            if (b.isPresent()) return b;
+        }
+        return Optional.empty();
+    }
+
     /** Build block starting from menu anchor row. */
     static Block buildBlockFromAnchor(Sheet sh, int r, TemplateCols T){
         int lastRow = sh.getLastRowNum();
@@ -1035,6 +1092,7 @@ public class JsonToExcelGeneral {
         for (String s : src) {
             String t = nz(s).trim();
             if (t.isEmpty()) continue;
+            if (t.equals("없음")) continue;
             if (prev != null && normalizeMenu(prev).equals(normalizeMenu(t))) {
                 // skip duplicate
             } else {
@@ -1249,71 +1307,6 @@ public class JsonToExcelGeneral {
                 .trim();
     }
 
-    static int initKidsCountBlockOnce(Sheet sh, Styles S, TplKind kind) {
-
-        // Row index mapping: Excel row2 => r=1
-        if (kind == TplKind.P35) {
-            // Need rows 2~3 (r=1~2), and keep row6 blank => start from row7 (r=6)
-
-            Row r2 = sh.getRow(1);
-            if (r2 == null) r2 = sh.createRow(1);
-            Row r3 = sh.getRow(2);
-            if (r3 == null) r3 = sh.createRow(2);
-
-            // C2:C3 merged "원아수"
-            Cell c2 = safeCell(sh, 1, 2);
-            c2.setCellValue("원아수");
-            c2.setCellStyle(S.headerNoFill);
-
-            Cell c3 = safeCell(sh, 2, 2);
-            c3.setCellStyle(S.headerNoFill);
-
-            addMergeSafe(sh, new CellRangeAddress(1, 2, 2, 2));
-
-            // D2 / D3
-            Cell d2 = safeCell(sh, 1, 3);
-            d2.setCellValue("1~2세");
-            d2.setCellStyle(S.headerNoFill);
-
-            Cell d3 = safeCell(sh, 2, 3);
-            d3.setCellValue("3~5세");
-            d3.setCellStyle(S.headerNoFill);
-
-            // E2 yellow / E3 pink
-            Cell e2 = safeCell(sh, 1, 4);
-            e2.setCellStyle(S.kidsCnt12Fill); // #FFFF9F
-
-            Cell e3 = safeCell(sh, 2, 4);
-            e3.setCellStyle(S.kidsCnt35Fill); // #FF9B9B
-
-            // Border for the block C2:E3
-            setMergedBorder(sh, new CellRangeAddress(1, 2, 2, 4), BorderStyle.THIN);
-
-            // Ensure row6 (Excel 6) is blank => start at row7 (0-based 6)
-            return 3;
-        }
-
-        // P12: only row2 (r=1), keep row5 blank => start from row6 (r=5)
-        Row r2 = sh.getRow(1);
-        if (r2 == null) r2 = sh.createRow(1);
-
-        Cell c2 = safeCell(sh, 1, 2);
-        c2.setCellValue("원아수");
-        c2.setCellStyle(S.headerNoFill);
-
-        Cell d2 = safeCell(sh, 1, 3);
-        d2.setCellValue("1~2세");
-        d2.setCellStyle(S.headerNoFill);
-
-        Cell e2 = safeCell(sh, 1, 4);
-        e2.setCellStyle(S.kidsCnt12Fill); // #FFFF9F
-
-        setMergedBorder(sh, new CellRangeAddress(1, 1, 2, 4), BorderStyle.THIN);
-
-        // Ensure row5 (Excel 5) is blank => start at row6 (0-based 5)
-        return 2;
-    }
-
     static void clearBordersInColumnA(Sheet sh, int fromRow, int toRow) {
         for (int r = fromRow; r <= toRow; r++) {
             Row row = sh.getRow(r);
@@ -1330,136 +1323,6 @@ public class JsonToExcelGeneral {
             cs.setBorderRight(BorderStyle.NONE);
             cell.setCellStyle(cs);
         }
-    }
-
-    static int createTopMergedBanner(Sheet sh, Styles S, int startRow, int firstCol, int lastCol, TplKind kind) {
-
-        // Row 1
-        Row r1 = sh.createRow(startRow);
-        r1.setHeightInPoints(34.5f);
-
-        // Row 2
-        Row r2 = sh.createRow(startRow + 1);
-        r2.setHeightInPoints(16.5f);
-
-        // Row 3
-        Row r3 = sh.createRow(startRow + 2);
-        r3.setHeightInPoints(16.5f);
-
-        // English comment: Merge only the center text area.
-        addMergeSafe(sh, new CellRangeAddress(startRow, startRow + 2, firstCol, lastCol));
-
-        // English comment: Put text on the merged anchor cell; alignment will center it across the merged region.
-        Cell c = safeCell(sh, startRow, firstCol);
-        c.setCellValue("<조리지시서>");
-        c.setCellStyle(S.banner);
-
-        // English comment: Add images for P35 only (keep original size).
-        try {
-            Path logoPath = Paths.get("input/Logo.png");
-            Path compPath = Paths.get("input/Company.png");
-
-            if (Files.exists(logoPath)) {
-                byte[] b = Files.readAllBytes(logoPath);
-
-                // Logo: start at B (index 1). Place within banner area.
-                int logoColStart = 1;
-
-                addPictureVertCenterByCm(sh, b, Workbook.PICTURE_TYPE_PNG,
-                        logoColStart,
-                        startRow, startRow + 3,
-                        5.05, 2.20,
-                        org.apache.poi.util.Units.pixelToEMU(4));
-
-            }
-
-            if (Files.exists(compPath)) {
-                byte[] b = Files.readAllBytes(compPath);
-
-                int compColStart;
-                if (kind == TplKind.P35) compColStart = 9; // J
-                else compColStart = 8;
-
-                int compColEndEx = compColStart + 3;
-
-
-                addPictureVertCenterByCm(sh, b, Workbook.PICTURE_TYPE_PNG,
-                        compColStart,
-                        startRow, startRow + 3,
-                        6.62, 1.11,
-                        0);
-            }
-        } catch (Exception ignore) {
-            // English comment: Ignore image errors
-        }
-
-        // English comment: Return the next available row index after the banner
-        return startRow + 3;
-    }
-
-
-    static int sumRowsHeightEmu(Sheet sh, int rowStart, int rowEndInclusive) {
-        double totalPoints = 0.0;
-        for (int r = rowStart; r <= rowEndInclusive; r++) {
-            Row row = sh.getRow(r);
-            float h;
-            if (row != null) h = row.getHeightInPoints();
-            else h = sh.getDefaultRowHeightInPoints();
-            totalPoints = totalPoints + h;
-        }
-        // 1 point = 12700 EMU
-        double emu = totalPoints * 12700.0;
-        return (int) Math.round(emu);
-    }
-
-    // English comment: Add picture anchored to a column range and vertically centered within given row range.
-    static void addPictureVertCenterByCm(
-            Sheet sh,
-            byte[] imgBytes,
-            int pictureType,
-            int colStart,
-            int rowStart,
-            int rowEndExclusive,
-            double targetWcm,
-            double targetHcm,
-            int dx1Emu
-    ) throws Exception {
-
-        int picIdx = sh.getWorkbook().addPicture(imgBytes, pictureType);
-
-        Drawing<?> drawing = sh.createDrawingPatriarch();
-        CreationHelper helper = sh.getWorkbook().getCreationHelper();
-
-        ClientAnchor anchor = helper.createClientAnchor();
-        anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
-
-        // English comment: Keep anchor to a single cell; final size is controlled by CTPicture ext (EMU).
-        anchor.setCol1(colStart);
-        anchor.setCol2(colStart + 1);
-        anchor.setRow1(rowStart);
-        anchor.setRow2(rowStart + 1);
-
-        // English comment: cm -> EMU (1 cm = 360000 EMU)
-        int finalWem = (int) Math.round(targetWcm * 360000.0);
-        int finalHem = (int) Math.round(targetHcm * 360000.0);
-
-        // English comment: Vertically center within banner rows (rowStart..rowEndExclusive-1)
-        int bannerHem = sumRowsHeightEmu(sh, rowStart, rowEndExclusive - 1);
-        int dyTop = 0;
-        if (bannerHem > finalHem) dyTop = (bannerHem - finalHem) / 2;
-
-        // English comment: Nudge right by dx1Emu (e.g., ~4 arrow presses)
-        anchor.setDx1(dx1Emu);
-        anchor.setDy1(dyTop);
-        anchor.setDx2(0);
-        anchor.setDy2(0);
-
-        org.apache.poi.xssf.usermodel.XSSFPicture pic =
-                (org.apache.poi.xssf.usermodel.XSSFPicture) drawing.createPicture(anchor, picIdx);
-
-        // English comment: Force final size in EMU (exact cm sizing)
-        pic.getCTPicture().getSpPr().getXfrm().getExt().setCx(finalWem);
-        pic.getCTPicture().getSpPr().getXfrm().getExt().setCy(finalHem);
     }
 
     static Sheet copyTopTemplateArea(
@@ -1554,6 +1417,100 @@ public class JsonToExcelGeneral {
         }
     }
 
+    static Path resolveAllergyImagePath() {
+        Path appHome = getAppHomeDir();
+        Path p1 = appHome.resolve("input").resolve("allergy.png");
+        if (Files.exists(p1)) return p1;
+
+        Path p2 = Paths.get("").toAbsolutePath().resolve("input").resolve("allergy.png");
+        if (Files.exists(p2)) return p2;
+
+        return null;
+    }
+
+    // English comment: Append allergy image under a day block, return next row index
+    static int appendAllergyImageUnderDay(Sheet sh, int rowIndex, int firstCol, int lastCol, TplKind kind) {
+        try {
+            Path imgPath = resolveAllergyImagePath();
+            if (imgPath == null) return rowIndex;
+
+            byte[] imgBytes = Files.readAllBytes(imgPath);
+            int picIdx = sh.getWorkbook().addPicture(imgBytes, Workbook.PICTURE_TYPE_PNG);
+
+            // English comment: Create a single "image row" with enough height
+            Row imgRow = sh.getRow(rowIndex);
+            if (imgRow == null) imgRow = sh.createRow(rowIndex);
+
+            // English comment: Adjust height if you want bigger/smaller image under each day
+            imgRow.setHeightInPoints(80.0f);
+
+            Drawing<?> drawing = sh.createDrawingPatriarch();
+            CreationHelper helper = sh.getWorkbook().getCreationHelper();
+
+            ClientAnchor anchor = helper.createClientAnchor();
+            anchor.setAnchorType(ClientAnchor.AnchorType.MOVE_DONT_RESIZE);
+
+            // English comment: Span the same width as the day table (B..LAST_COL)
+            anchor.setCol1(firstCol);
+            anchor.setCol2(lastCol + 1);   // exclusive
+            anchor.setRow1(rowIndex);
+            anchor.setRow2(rowIndex + 1);  // exclusive
+
+            anchor.setDx1(0);
+            anchor.setDy1(0);
+            anchor.setDx2(0);
+            anchor.setDy2(0);
+
+            org.apache.poi.xssf.usermodel.XSSFPicture pic =
+                    (org.apache.poi.xssf.usermodel.XSSFPicture) drawing.createPicture(anchor, picIdx);
+
+            // English comment: Fit image into the anchor cell range
+            pic.resize(1.00);
+
+            // English comment: Clear borders in column A for the image row too (keep layout clean)
+            clearBordersInColumnA(sh, rowIndex, rowIndex);
+
+            return rowIndex + 1;
+
+        } catch (Exception ignore) {
+            // English comment: Ignore image errors to avoid breaking XLSX generation
+            return rowIndex;
+        }
+    }
+
+    static void forceLeftOuterBorderDoubleAll(Sheet sh, int firstRow, int lastRow, int leftCol) {
+
+        // English comment: 1) Force cell styles (for non-merged cells).
+        int rr = firstRow;
+        while (rr <= lastRow) {
+            Cell c = safeCell(sh, rr, leftCol);
+
+            CellStyle cs = sh.getWorkbook().createCellStyle();
+            cs.cloneStyleFrom(c.getCellStyle());
+
+            cs.setBorderLeft(BorderStyle.DOUBLE);
+
+            c.setCellStyle(cs);
+            rr = rr + 1;
+        }
+
+        // English comment: 2) Force merged regions that sit on the left edge too (RegionUtil wins in Excel).
+        int i = 0;
+        while (i < sh.getNumMergedRegions()) {
+            CellRangeAddress ra = sh.getMergedRegion(i);
+
+            boolean touchesLeftEdge = (ra.getFirstColumn() == leftCol);
+            boolean overlapsRows = !(ra.getLastRow() < firstRow || ra.getFirstRow() > lastRow);
+
+            if (touchesLeftEdge && overlapsRows) {
+                org.apache.poi.ss.util.RegionUtil.setBorderLeft(BorderStyle.DOUBLE, ra, sh);
+            }
+
+            i = i + 1;
+        }
+    }
+
+
     // New: Convert JSON -> EXCEL with explicit paths (for AllInOne)
     public static Path convert(Path inputJson, Path outputXlsx) throws Exception {
         ZipSecureFile.setMinInflateRatio(0.0d);
@@ -1570,20 +1527,25 @@ public class JsonToExcelGeneral {
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
 
         Path tplFile = resolveGeneralTemplate(inputJson);
+        Path tplNewPath = resolveGeneralTemplateNew(inputJson);
+        Path tplOldPath = resolveGeneralTemplateOld(inputJson);
 
         TplKind tplKind = detectTplKind(tplFile);
         TemplateCols T = colsOf(tplKind);
 
         List<DayPlan> plan = readPlan(inputJson);
 
-        if (outputXlsx.toAbsolutePath().getParent() != null) {
-            Files.createDirectories(outputXlsx.toAbsolutePath().getParent());
-        }
+        if (outputXlsx.getParent() != null) Files.createDirectories(outputXlsx.getParent());
 
-        try (Workbook tpl = WorkbookFactory.create(Files.newInputStream(tplFile));
-             Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
+        Workbook tplNew = null;
+        Workbook tplOld = null;
 
-            Styles S = Styles.build(out);
+
+        try (Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
+
+            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
+            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
+
 
             // English comment: Split normal days and birthday days
             List<DayPlan> normalDays = new ArrayList<>();
@@ -1598,7 +1560,7 @@ public class JsonToExcelGeneral {
 
             int weekIndex = 1;
 
-            String baseName = "25. 12월 둘째주";
+            String baseName = out.getSheetName(0);
 
             // Keep only base sheet in template workbook
             for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
@@ -1608,9 +1570,13 @@ public class JsonToExcelGeneral {
 
             // Re-find baseIdx (it will be 0 after pruning)
             int baseIdx = out.getSheetIndex(baseName);
-            if (baseIdx < 0) throw new IllegalStateException("Base sheet not found: " + baseName);
+            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
+            Styles S = Styles.build(out);
 
-            int DATA_START_ROW = 6;
+            int DATA_START_ROW;
+            if (tplKind == TplKind.P12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
+            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
+
             int keepLastRow = DATA_START_ROW - 1;
 
             Sheet sh = copyTopTemplateArea(
@@ -1628,11 +1594,13 @@ public class JsonToExcelGeneral {
                 if (d == null) continue;
                 if (d.date == null) continue;
 
-                currentRow = writeOneDay(
-                        sh, S, d, tpl, T, tplKind,
-                        titlePrefix, currentRow, false
-                );
-                currentRow = currentRow + 2;
+                int beforeRow = currentRow;
+
+                currentRow = writeOneDay(sh, S, d, tplNew, tplOld, T, tplKind, titlePrefix, currentRow, false);
+
+                if (currentRow > beforeRow) {
+                    currentRow = currentRow + 1;
+                }
 
                 if (isWeekEndGeneral(d.weekday)) {
                     if (i < normalDays.size() - 1) {
@@ -1663,12 +1631,12 @@ public class JsonToExcelGeneral {
                 int r = DATA_START_ROW;
 
                 for (DayPlan d : birthdayDays) {
-                    r = writeOneDay(bdaySheet,S,d,tpl,T,tplKind,titlePrefix,r,true);   // isBirthday = true);
+                    r = writeOneDay(bdaySheet, S, d, tplNew, tplOld, T, tplKind, titlePrefix, r, true);
                     r = r + 4; // Birthday는 하루 블록 간격을 넉넉히
                 }
             }
 
-            int baseIdx2 = out.getSheetIndex("25. 12월 둘째주");
+            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
             if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
             try (OutputStream os = Files.newOutputStream(outputXlsx)) {

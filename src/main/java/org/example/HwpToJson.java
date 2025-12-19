@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
 
 public class HwpToJson {
     // ===== Input (default) =====
-    private static final Path IN_HWP = Paths.get("input", "2025년 1월 시간연장형(만3-5세).hwp");
+    private static final Path IN_HWP = Paths.get("input", "2026년 1월 시간연장형(만1-2세).hwp");
 
     // ===== Output dir =====
     private static final Path OUT_DIR = Paths.get("output");
