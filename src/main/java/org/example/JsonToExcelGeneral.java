@@ -18,6 +18,7 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.*;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -1140,7 +1141,11 @@ public class JsonToExcelGeneral {
             return YearMonth.of(y, Math.min(Math.max(mo,1),12));
         }
 
-        return YearMonth.of(2025, 12);
+        YearMonth ym2 = tryInferYMFromKoreanName(name);
+        if (ym2 != null) return ym2;
+
+// English comment: Last resort: use current year-month.
+        return YearMonth.from(LocalDate.now());
     }
 
     static List<DayPlan> readPlan(Path json) throws IOException {
@@ -1160,6 +1165,8 @@ public class JsonToExcelGeneral {
     }
 
     public static Path convertFromJsonString(String jsonString, Path sourceNamePath, Path outputXlsx) throws Exception {
+        BORDER_STYLE_CACHE.clear();
+
         ZipSecureFile.setMinInflateRatio(0.0d);
         ZipSecureFile.setMaxFileCount(20000);
 
@@ -1171,8 +1178,10 @@ public class JsonToExcelGeneral {
             throw new IllegalArgumentException("outputXlsx is null");
         }
 
-        YearMonth ym = inferYMFromJson(sourceNamePath);
+        YearMonth ym = inferYMFromSourceName(sourceNamePath);
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
+
+        String monthPrefix = extractMonthPrefixFromSourceName(sourceNamePath); // English comment: "26.1월"
 
         Path tplFile = resolveGeneralTemplate(sourceNamePath);
         Path tplNewPath = resolveGeneralTemplateNew(sourceNamePath);
@@ -1230,7 +1239,7 @@ public class JsonToExcelGeneral {
             Sheet sh = copyTopTemplateArea(
                     out,
                     baseIdx,
-                    makeWeekSheetName(ym, weekIndex),
+                    buildSheetName(monthPrefix, weekIndex),
                     keepLastRow
             );
 
@@ -1256,7 +1265,7 @@ public class JsonToExcelGeneral {
                         sh = copyTopTemplateArea(
                                 out,
                                 baseIdx,
-                                makeWeekSheetName(ym, weekIndex),
+                                buildSheetName(monthPrefix, weekIndex),
                                 keepLastRow
                         );
 
@@ -1272,7 +1281,7 @@ public class JsonToExcelGeneral {
                 Sheet bdaySheet = copyTopTemplateArea(
                         out,
                         baseIdx,
-                        makeBirthdaySheetName(ym),
+                        buildBirthdaySheetName(monthPrefix),
                         keepLastRow
                 );
 
@@ -1656,6 +1665,122 @@ public class JsonToExcelGeneral {
         }
     }
 
+    private static String extractMonthPrefixFromSourceName(Path sourceNamePath) {
+        // English comment: Parse "2026년 1월 ..." from source file name.
+        String name = sourceNamePath.getFileName().toString();
+
+        // English comment: Remove extension for cleaner matching.
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            name = name.substring(0, dot);
+        }
+
+        Pattern p = Pattern.compile("(\\d{4})\\s*년\\s*(\\d{1,2})\\s*월");
+        Matcher m = p.matcher(name);
+
+        if (!m.find()) {
+            // English comment: Fallback prefix when filename doesn't match.
+            return "00.0월";
+        }
+
+        int year = Integer.parseInt(m.group(1));
+        int month = Integer.parseInt(m.group(2));
+
+        // English comment: Convert 2026 -> 26
+        int yy = year % 100;
+
+        // English comment: Build "26.1월"
+        return yy + "." + month + "월";
+    }
+
+    private static String buildSheetName(String monthPrefix, int weekIndex) {
+        String wk;
+        if (weekIndex == 1) wk = "첫째";
+        else if (weekIndex == 2) wk = "둘째";
+        else if (weekIndex == 3) wk = "셋째";
+        else if (weekIndex == 4) wk = "넷째";
+        else if (weekIndex == 5) wk = "다섯째";
+        else if (weekIndex == 6) wk = "여섯째";
+        else wk = String.valueOf(weekIndex) + "째";
+
+        String sheetName = monthPrefix + " " + wk + "주";
+
+        if (sheetName.length() > 31) sheetName = sheetName.substring(0, 31);
+
+        sheetName = sheetName.replace("/", "_")
+                .replace("\\", "_")
+                .replace("[", "(")
+                .replace("]", ")")
+                .replace(":", "-")
+                .replace("*", "_");
+
+        return sheetName;
+    }
+
+
+    private static String buildBirthdaySheetName(String monthPrefix) {
+        // English comment: Build "26.1월 ★birthday"
+        String sheetName = monthPrefix + " ★birthday";
+
+        if (sheetName.length() > 31) {
+            sheetName = sheetName.substring(0, 31);
+        }
+
+        sheetName = sheetName.replace("/", "_");
+        sheetName = sheetName.replace("\\", "_");
+        sheetName = sheetName.replace("[", "(");
+        sheetName = sheetName.replace("]", ")");
+        sheetName = sheetName.replace(":", "-");
+        sheetName = sheetName.replace("*", "_");
+
+        return sheetName;
+    }
+
+    static YearMonth inferYMFromSourceName(Path sourceNamePath) {
+        // English comment: Parse "2026년 1월 ..." from HWP file name.
+        String name = sourceNamePath.getFileName().toString();
+
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            name = name.substring(0, dot);
+        }
+
+        Pattern p = Pattern.compile("(\\d{4})\\s*년\\s*(\\d{1,2})\\s*월");
+        Matcher m = p.matcher(name);
+
+        if (m.find()) {
+            int y = Integer.parseInt(m.group(1));
+            int mo = Integer.parseInt(m.group(2));
+
+            if (mo < 1) mo = 1;
+            if (mo > 12) mo = 12;
+
+            return YearMonth.of(y, mo);
+        }
+
+        // English comment: Fallback to previous parser (may work for other naming patterns).
+        return inferYMFromJson(sourceNamePath);
+    }
+
+    static YearMonth tryInferYMFromKoreanName(String filename) {
+        if (filename == null) return null;
+
+        String name = filename;
+
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) name = name.substring(0, dot);
+
+        Matcher m = Pattern.compile("(20\\d{2})\\s*년\\s*(\\d{1,2})\\s*월").matcher(name);
+        if (!m.find()) return null;
+
+        int y = Integer.parseInt(m.group(1));
+        int mo = Integer.parseInt(m.group(2));
+
+        if (mo < 1) mo = 1;
+        if (mo > 12) mo = 12;
+
+        return YearMonth.of(y, mo);
+    }
 
     // New: Convert JSON -> EXCEL with explicit paths (for AllInOne)
     public static Path convert(Path inputJson, Path outputXlsx) throws Exception {
@@ -1669,8 +1794,10 @@ public class JsonToExcelGeneral {
             throw new IllegalArgumentException("outputXlsx is null");
         }
 
-        YearMonth ym = inferYMFromJson(inputJson);
+        YearMonth ym = inferYMFromSourceName(inputJson);
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
+
+        String monthPrefix = extractMonthPrefixFromSourceName(inputJson); // English comment: "26.1월"
 
         Path tplFile = resolveGeneralTemplate(inputJson);
         Path tplNewPath = resolveGeneralTemplateNew(inputJson);
@@ -1728,7 +1855,7 @@ public class JsonToExcelGeneral {
             Sheet sh = copyTopTemplateArea(
                     out,
                     baseIdx,
-                    makeWeekSheetName(ym, weekIndex),
+                    buildSheetName(monthPrefix, weekIndex),
                     keepLastRow
             );
 
@@ -1754,7 +1881,7 @@ public class JsonToExcelGeneral {
                         sh = copyTopTemplateArea(
                                 out,
                                 baseIdx,
-                                makeWeekSheetName(ym, weekIndex),
+                                buildSheetName(monthPrefix, weekIndex),
                                 keepLastRow
                         );
 
@@ -1770,7 +1897,7 @@ public class JsonToExcelGeneral {
                 Sheet bdaySheet = copyTopTemplateArea(
                         out,
                         baseIdx,
-                        makeBirthdaySheetName(ym),
+                        buildBirthdaySheetName(monthPrefix),
                         keepLastRow
                 );
 

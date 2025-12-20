@@ -54,6 +54,8 @@ public class JsonToExcel {
 
     enum OutputMode {AGE12, AGE35}
 
+    static final Map<String, CellStyle> STYLE_CACHE = new HashMap<>();
+
     static final Map<String, String> ALIAS = new HashMap<>();
 
     static {
@@ -84,6 +86,7 @@ public class JsonToExcel {
 
         YearMonth ym = inferYMFromJson(jsonPlan);
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
+        String monthPrefix = extractMonthPrefixFromSourceName(jsonPlan);
 
         OutputMode mode = inferModeFromJsonName(jsonPlan);
 
@@ -121,7 +124,7 @@ public class JsonToExcel {
             Styles S = Styles.build(out);
 
             int weekNo = 1;
-            Sheet sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+            Sheet sh = copyTopTemplateArea(out, baseIdx, buildSheetName(monthPrefix, weekNo), keepLastRow);
             sh.setDefaultColumnStyle(0, S.blankA);
 
             int nextRow = DATA_START_ROW;
@@ -141,7 +144,7 @@ public class JsonToExcel {
                         // English comment: Prepare next week sheet if there are remaining days.
                         if (i + 1 < plan.size()) {
                             weekNo = weekNo + 1;
-                            sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+                            sh = copyTopTemplateArea(out, baseIdx, buildSheetName(monthPrefix, weekNo), keepLastRow);
                             sh.setDefaultColumnStyle(0, S.blankA);
                             nextRow = DATA_START_ROW;
                         }
@@ -308,12 +311,15 @@ public class JsonToExcel {
             Cell d2 = hr2.getCell(colD);
             d2.setCellValue("1~2세");
             d2.setCellStyle(S.header);
+
             Cell e2 = hr2.getCell(colE);
             e2.setCellValue("3~5세");
-            d2.setCellStyle(S.header);
+            e2.setCellStyle(S.header);
+
             Cell f2 = hr2.getCell(colF);
             f2.setCellValue("1~2세");
             f2.setCellStyle(S.headerSubYellow);
+
             Cell g2 = hr2.getCell(colG);
             g2.setCellValue("3~5세");
             g2.setCellStyle(S.headerSubPink);
@@ -445,13 +451,19 @@ public class JsonToExcel {
                 a.setCellValue("");
                 a.setCellStyle(S.blankA);
 
-                CellStyle cs = sh.getWorkbook().createCellStyle();
-                cs.cloneStyleFrom(a.getCellStyle());
-                cs.setBorderTop(BorderStyle.NONE);
-                cs.setBorderBottom(BorderStyle.NONE);
-                cs.setBorderLeft(BorderStyle.NONE);
-                cs.setBorderRight(BorderStyle.NONE);
-                a.setCellStyle(cs);
+                Workbook wb = sh.getWorkbook();
+                CellStyle base = S.blankA;
+
+                String key = "COLA_CLEAN|" + System.identityHashCode(base);
+                CellStyle derived = getOrCreateStyle(
+                        wb,
+                        key,
+                        base,
+                        BorderStyle.NONE, BorderStyle.NONE, BorderStyle.NONE, BorderStyle.NONE,
+                        true
+                );
+
+                a.setCellStyle(derived);
 
                 rr = rr + 1;
             }
@@ -760,13 +772,19 @@ public class JsonToExcel {
     }
 
     static void setBorders(Cell cell, BorderStyle bs) {
-        CellStyle clone = cell.getSheet().getWorkbook().createCellStyle();
-        clone.cloneStyleFrom(cell.getCellStyle());
-        clone.setBorderBottom(bs);
-        clone.setBorderTop(bs);
-        clone.setBorderLeft(bs);
-        clone.setBorderRight(bs);
-        cell.setCellStyle(clone);
+        Workbook wb = cell.getSheet().getWorkbook();
+        CellStyle base = cell.getCellStyle();
+
+        String key = "BORDERS_ALL|" + System.identityHashCode(base) + "|" + bs.name();
+        CellStyle derived = getOrCreateStyle(
+                wb,
+                key,
+                base,
+                bs, bs, bs, bs,
+                false
+        );
+
+        cell.setCellStyle(derived);
     }
 
     static void setMergedBorder(Sheet sh, CellRangeAddress rgn, BorderStyle bs) {
@@ -839,7 +857,11 @@ public class JsonToExcel {
             int mo = Integer.parseInt(mYYYY.group(2));
             return YearMonth.of(y, Math.min(12, Math.max(1, mo)));
         }
-        return YearMonth.of(2025, 12);
+        YearMonth ym2 = tryInferYMFromKoreanName(name);
+        if (ym2 != null) return ym2;
+
+// English comment: Last resort: use current year-month.
+        return YearMonth.from(LocalDate.now());
     }
 
     static boolean isTailMenu(String s) {
@@ -1053,6 +1075,7 @@ public class JsonToExcel {
     }
 
     public static Path convertFromJsonString(String jsonString, Path sourceNamePath, Path outXlsxPath) throws Exception {
+
         ZipSecureFile.setMinInflateRatio(0.0d);
         ZipSecureFile.setMaxFileCount(20000);
 
@@ -1061,8 +1084,10 @@ public class JsonToExcel {
         if (sourceNamePath == null) throw new IllegalArgumentException("sourceNamePath is null");
         if (outXlsxPath == null) throw new IllegalArgumentException("outXlsxPath is null");
 
+
         YearMonth ym = inferYMFromJson(sourceNamePath);
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
+        String monthPrefix = extractMonthPrefixFromSourceName(sourceNamePath);
 
         if (outXlsxPath.getParent() != null) Files.createDirectories(outXlsxPath.getParent());
 
@@ -1102,7 +1127,7 @@ public class JsonToExcel {
             int keepLastRow = DATA_START_ROW - 1;
 
             int weekNo = 1;
-            Sheet sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+            Sheet sh = copyTopTemplateArea(out, baseIdx, buildSheetName(monthPrefix, weekNo), keepLastRow);
             sh.setDefaultColumnStyle(0, S.blankA);
 
             int nextRow = DATA_START_ROW;
@@ -1122,7 +1147,7 @@ public class JsonToExcel {
                         // English comment: Prepare next week sheet if there are remaining days.
                         if (i + 1 < plan.size()) {
                             weekNo = weekNo + 1;
-                            sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+                            sh = copyTopTemplateArea(out, baseIdx, buildSheetName(monthPrefix, weekNo), keepLastRow);
                             sh.setDefaultColumnStyle(0, S.blankA);
                             nextRow = DATA_START_ROW;
                         }
@@ -1462,7 +1487,7 @@ public class JsonToExcel {
         if (t.length() == 0) return false;
 
         // English comment: Accept common Korean labels and also cases like "금(요일)".
-        if (t.contains("금")) return true;
+        if (t.equals("금") || t.startsWith("금")) return true;
         if (t.toLowerCase(Locale.ROOT).contains("fri")) return true;
 
         return false;
@@ -1472,36 +1497,17 @@ public class JsonToExcel {
         if (ym == null) return false;
         if (d == null) return false;
 
-        // English comment: Prefer the provided weekday string if it clearly indicates Friday.
-        if (isFriday(d.weekday)) return true;
-
-        // English comment: If weekday is missing or unreliable, compute from YearMonth + day-of-month.
+        // English comment: Always prefer computed day-of-week from YearMonth + day-of-month
+        // English comment: to avoid JSON weekday text issues (e.g., wrong labels in time-extension plan).
         try {
             LocalDate dt = ym.atDay(d.date);
-            DayOfWeek dow = dt.getDayOfWeek();
-            if (dow == DayOfWeek.FRIDAY) return true;
+            return dt.getDayOfWeek() == DayOfWeek.FRIDAY;
         } catch (Exception ignore) {
-            // English comment: Ignore invalid dates (out of month range) safely.
+            // English comment: Fallback only when date is invalid.
         }
 
-        return false;
-    }
-    static String buildWeekSheetName(YearMonth ym, int weekNo) {
-        int yy = ym.getYear() % 100;
-        int m = ym.getMonthValue();
-
-        // English comment: Week label in Korean ordinal form.
-        String wk;
-        if (weekNo == 1) wk = "첫째";
-        else if (weekNo == 2) wk = "둘째";
-        else if (weekNo == 3) wk = "셋째";
-        else if (weekNo == 4) wk = "넷째";
-        else if (weekNo == 5) wk = "다섯째";
-        else if (weekNo == 6) wk = "여섯째";
-        else wk = String.valueOf(weekNo) + "째";
-
-        // English comment: Format => "YY. M월 첫째주" (month without leading zero)
-        return String.format("%d. %d월 %s주", yy, m, wk);
+        // English comment: Fallback to text-based check (last resort).
+        return isFriday(d.weekday);
     }
 
     static void removeHorizontalMergesInColumnA(Sheet sh, int row1, int row2) {
@@ -1525,6 +1531,109 @@ public class JsonToExcel {
         for (int idx : toRemove) sh.removeMergedRegion(idx);
     }
 
+    private static String extractMonthPrefixFromSourceName(Path sourceNamePath) {
+        // English comment: Parse "2026년 1월 ..." from source file name.
+        String name = sourceNamePath.getFileName().toString();
+
+        // English comment: Remove extension for cleaner matching.
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            name = name.substring(0, dot);
+        }
+
+        Pattern p = Pattern.compile("(\\d{4})\\s*년\\s*(\\d{1,2})\\s*월");
+        Matcher m = p.matcher(name);
+
+        if (!m.find()) {
+            // English comment: Fallback prefix when filename doesn't match.
+            return "00.0월";
+        }
+
+        int year = Integer.parseInt(m.group(1));
+        int month = Integer.parseInt(m.group(2));
+
+        // English comment: Convert 2026 -> 26
+        int yy = year % 100;
+
+        // English comment: Build "26.1월"
+        return yy + "." + month + "월";
+    }
+
+    private static String buildSheetName(String monthPrefix, int weekIndex) {
+        String wk;
+        if (weekIndex == 1) wk = "첫째";
+        else if (weekIndex == 2) wk = "둘째";
+        else if (weekIndex == 3) wk = "셋째";
+        else if (weekIndex == 4) wk = "넷째";
+        else if (weekIndex == 5) wk = "다섯째";
+        else if (weekIndex == 6) wk = "여섯째";
+        else wk = String.valueOf(weekIndex) + "째";
+
+        String sheetName = monthPrefix + " " + wk + "주";
+
+        // English comment: Excel sheet name length limit is 31.
+        if (sheetName.length() > 31) {
+            sheetName = sheetName.substring(0, 31);
+        }
+
+        // English comment: Replace forbidden characters for Excel sheet names.
+        sheetName = sheetName.replace("/", "_");
+        sheetName = sheetName.replace("\\", "_");
+        sheetName = sheetName.replace("[", "(");
+        sheetName = sheetName.replace("]", ")");
+        sheetName = sheetName.replace(":", "-");
+        sheetName = sheetName.replace("*", "_");
+
+        return sheetName;
+    }
+
+
+    static CellStyle getOrCreateStyle(Workbook wb, String key, CellStyle base, BorderStyle top, BorderStyle bottom, BorderStyle left, BorderStyle right,
+                                      boolean noFill) {
+
+        CellStyle cached = STYLE_CACHE.get(key);
+        if (cached != null) return cached;
+
+        CellStyle cs = wb.createCellStyle();
+        cs.cloneStyleFrom(base);
+
+        if (top != null) cs.setBorderTop(top);
+        if (bottom != null) cs.setBorderBottom(bottom);
+        if (left != null) cs.setBorderLeft(left);
+        if (right != null) cs.setBorderRight(right);
+
+        if (noFill) {
+            cs.setFillPattern(FillPatternType.NO_FILL);
+            cs.setFillForegroundColor(IndexedColors.AUTOMATIC.getIndex());
+            cs.setFillBackgroundColor(IndexedColors.AUTOMATIC.getIndex());
+        }
+
+        STYLE_CACHE.put(key, cs);
+        return cs;
+    }
+
+    static YearMonth tryInferYMFromKoreanName(String filename) {
+        if (filename == null) return null;
+
+        String name = filename;
+
+        // English comment: Remove extension for cleaner matching.
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) name = name.substring(0, dot);
+
+        // English comment: Match "2026년 1월" (allow spaces)
+        Matcher m = Pattern.compile("(20\\d{2})\\s*년\\s*(\\d{1,2})\\s*월").matcher(name);
+        if (!m.find()) return null;
+
+        int y = Integer.parseInt(m.group(1));
+        int mo = Integer.parseInt(m.group(2));
+
+        if (mo < 1) mo = 1;
+        if (mo > 12) mo = 12;
+
+        return YearMonth.of(y, mo);
+    }
+
     // New: JSON -> Excel with explicit paths
     public static Path convert(Path jsonPlan, Path outXlsxPath) throws Exception {
         ZipSecureFile.setMinInflateRatio(0.0d);
@@ -1532,6 +1641,7 @@ public class JsonToExcel {
 
         YearMonth ym = inferYMFromJson(jsonPlan);
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
+        String monthPrefix = extractMonthPrefixFromSourceName(jsonPlan);
 
         if (outXlsxPath.getParent() != null) Files.createDirectories(outXlsxPath.getParent());
 
@@ -1571,7 +1681,7 @@ public class JsonToExcel {
             int keepLastRow = DATA_START_ROW - 1;
 
             int weekNo = 1;
-            Sheet sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+            Sheet sh = copyTopTemplateArea(out, baseIdx, buildSheetName(monthPrefix, weekNo), keepLastRow);
             sh.setDefaultColumnStyle(0, S.blankA);
 
             int nextRow = DATA_START_ROW;
@@ -1591,7 +1701,7 @@ public class JsonToExcel {
                         // English comment: Prepare next week sheet if there are remaining days.
                         if (i + 1 < plan.size()) {
                             weekNo = weekNo + 1;
-                            sh = copyTopTemplateArea(out, baseIdx, buildWeekSheetName(ym, weekNo), keepLastRow);
+                            sh = copyTopTemplateArea(out, baseIdx, buildSheetName(monthPrefix, weekNo), keepLastRow);
                             sh.setDefaultColumnStyle(0, S.blankA);
                             nextRow = DATA_START_ROW;
                         }

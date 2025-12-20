@@ -1,0 +1,38 @@
+.root {
+    -fx-font-family: "맑은 고딕";
+    -fx-font-size: 13px;
+}
+
+.title {
+    -fx-font-size: 22px;
+    -fx-font-weight: 700;
+}
+
+.subtitle {
+    -fx-text-fill: #666666;
+}
+
+.drop-zone {
+    -fx-background-color: #f6f7fb;
+    -fx-border-color: #d9dbe7;
+    -fx-border-radius: 14;
+    -fx-background-radius: 14;
+}
+
+.drop-title {
+    -fx-font-size: 16px;
+    -fx-font-weight: 700;
+}
+
+.drop-hint {
+    -fx-text-fill: #666666;
+}
+
+.button.primary {
+    -fx-background-radius: 10;
+    -fx-font-weight: 700;
+}
+
+.button.secondary {
+    -fx-background-radius: 10;
+}
