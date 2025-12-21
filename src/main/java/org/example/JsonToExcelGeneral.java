@@ -300,6 +300,10 @@ public class JsonToExcelGeneral {
             CellStyle headerKidsFill12 = makeFill(wb, header, 0xFF, 0xFF, 0x9F); // #FFFF9F
             CellStyle headerKidsFill35 = makeFill(wb, header, 0xFF, 0x9B, 0x9B); // #FF9B9B
 
+            header.setWrapText(false);
+            labelAm.setWrapText(false);
+            labelPm.setWrapText(false);
+
             return new Styles(title, banner, header, headerNoFill, bodyCenter, methodMerged, num1, dec1,
                     labelAm, labelLunch, labelPm,
                     kidsCnt12Fill, kidsCnt35Fill, headerKidsFill12, headerKidsFill35);

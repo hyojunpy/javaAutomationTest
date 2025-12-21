@@ -327,6 +327,7 @@ public class JsonToExcel {
             // AGE12: D column => per-serving, E column => total
             Cell d1 = hr1.getCell(colD);
             d1.setCellValue("1인 제공량(g)");
+            d1.setCellStyle(S.header);
             Cell e1 = hr1.getCell(colE);
             e1.setCellValue("총 발주량");
 
@@ -960,7 +961,6 @@ public class JsonToExcel {
             headerSubPink.cloneStyleFrom(header);
             // English comment: Approx pink for #FF9B9B
 
-
             CellStyle bodyCenter = wb.createCellStyle();
             bodyCenter.cloneStyleFrom(base);
             bodyCenter.setAlignment(HorizontalAlignment.CENTER);
@@ -997,7 +997,6 @@ public class JsonToExcel {
             gapBlank.setFillPattern(FillPatternType.NO_FILL);
             gapBlank.setFillForegroundColor(IndexedColors.AUTOMATIC.getIndex());
             gapBlank.setFillBackgroundColor(IndexedColors.AUTOMATIC.getIndex());
-
 
             CellStyle methodMerged = wb.createCellStyle();
             methodMerged.cloneStyleFrom(base);
@@ -1051,7 +1050,9 @@ public class JsonToExcel {
 
                 headerSubPink.setFillForegroundColor(IndexedColors.ROSE.getIndex());
                 headerSubPink.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
             }
+            header.setWrapText(false);
 
             return new Styles(title, header, headerSubYellow, headerSubPink, bodyCenter, blankA, gapBlank, methodMerged, num1dec, numGeneral, param);
         }
