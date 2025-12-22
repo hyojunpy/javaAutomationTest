@@ -952,11 +952,11 @@ public class JsonToExcelGeneral {
             e.setCellStyle(S.num1);
 
             Cell t_12 = row.createCell(5 + OUT_COL_OFFSET);
-            t_12.setCellFormula(String.format("IF($E$2=\"\",\"0\",E%d*$E$2)", excelRow));
+            t_12.setCellFormula(String.format("E%d*$E$2", excelRow));
             t_12.setCellStyle(S.num1);
 
             Cell t_35 = row.createCell(6 + OUT_COL_OFFSET);
-            t_35.setCellFormula(String.format("IF($E$3=\"\",\"0\",F%d*$E$3)", excelRow));
+            t_35.setCellFormula(String.format("F%d*$E$3", excelRow));
             t_35.setCellStyle(S.num1);
 
             Cell g = row.createCell(7 + OUT_COL_OFFSET);
@@ -974,7 +974,7 @@ public class JsonToExcelGeneral {
 
             int excelRow = row.getRowNum() + 1;
             Cell e = row.createCell(4 + OUT_COL_OFFSET);
-            e.setCellFormula(String.format("IF($E$2=\"\",\"0\",E%d*$E$2)", excelRow));
+            e.setCellFormula(String.format("E%d*$E$2", excelRow));
             e.setCellStyle(S.num1);
 
             Cell f = row.createCell(5 + OUT_COL_OFFSET);

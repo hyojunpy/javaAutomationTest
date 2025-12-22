@@ -513,26 +513,46 @@ public class JsonToExcel {
             // D: 1~2 (derived from E * 0.65)
             // E: 3~5 (input)
             Cell e = row.createCell(4);
-            boolean eIsNum = trySetNumeric(e, p35);
-            if (!eIsNum) e.setCellValue(nz(p35));
-            e.setCellStyle(S.numGeneral);
 
-            Cell d = row.createCell(3);
-            d.setCellFormula(String.format("E%d*0.65", excelRow));
-            boolean forceOneDecimal = shouldForceOneDecimal(p35);
-            if (forceOneDecimal) d.setCellStyle(S.num1dec);
-            else d.setCellStyle(S.numGeneral);
+// English comment: In AGE35, D/F/G depend on E being numeric.
+// English comment: Parse numeric aggressively; if not numeric, keep text but avoid broken formulas.
+            Double p35val = parseNumericOrNull(p35);
 
-            // F: total 1~2 (no param row -> just equal to D for now)
-            // F: total 1~2 (multiplier at $D$2)
-            Cell f = row.createCell(5);
-            f.setCellFormula(String.format("D%d*$D$2", excelRow));
-            f.setCellStyle(S.numGeneral);
+            if (p35val != null) {
+                e.setCellValue(p35val.doubleValue());
+                e.setCellStyle(S.numGeneral);
 
-// G: total 3~5 (multiplier at $D$3)
-            Cell g = row.createCell(6);
-            g.setCellFormula(String.format("E%d*$D$3", excelRow));
-            g.setCellStyle(S.numGeneral);
+                Cell d = row.createCell(3);
+                d.setCellFormula(String.format("E%d*0.65", excelRow));
+                boolean forceOneDecimal = shouldForceOneDecimal(p35);
+                if (forceOneDecimal) d.setCellStyle(S.num1dec);
+                else d.setCellStyle(S.numGeneral);
+
+                Cell f = row.createCell(5);
+                f.setCellFormula(String.format("D%d*$D$2", excelRow));
+                f.setCellStyle(S.numGeneral);
+
+                Cell g = row.createCell(6);
+                g.setCellFormula(String.format("E%d*$D$3", excelRow));
+                g.setCellStyle(S.numGeneral);
+
+            } else {
+                // English comment: Keep original text in E, but do NOT set formulas that would produce #VALUE!
+                e.setCellValue(nz(p35));
+                e.setCellStyle(S.bodyCenter); // English comment: Treat as text.
+
+                Cell d = row.createCell(3);
+                d.setCellValue("");
+                d.setCellStyle(S.numGeneral);
+
+                Cell f = row.createCell(5);
+                f.setCellValue("");
+                f.setCellStyle(S.numGeneral);
+
+                Cell g = row.createCell(6);
+                g.setCellValue("");
+                g.setCellStyle(S.numGeneral);
+            }
 
             // H: method text (actual merge is handled outside)
             Cell h = row.createCell(7);
