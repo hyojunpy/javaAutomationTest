@@ -1590,7 +1590,7 @@ public class JsonToExcel {
         else if (weekIndex == 6) wk = "여섯째";
         else wk = String.valueOf(weekIndex) + "째";
 
-        String sheetName = monthPrefix + " " + wk + "주";
+        String sheetName = monthPrefix.replace(".", ". ") + " " + wk + "주";
 
         // English comment: Excel sheet name length limit is 31.
         if (sheetName.length() > 31) {

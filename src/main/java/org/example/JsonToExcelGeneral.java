@@ -50,13 +50,13 @@ public class JsonToExcelGeneral {
     static final String TEMPLATE_12_NAME_2026 = "★2026~조리지시서(만1-2세 일반형).xlsx";
     static final String TEMPLATE_35_NAME_2026 = "★2026~조리지시서(만3-5세 일반형).xlsx";
 
-    /* ===== Headers ===== */
-    static final String[] HEADER_12 = { "구분", "메뉴명", "식재료명",
-            "1인 제공량(g)\n1~2세", "총 발주량\n1~2세", "만드는방법" };
-
-    static final String[] HEADER_35 = { "구분", "메뉴명", "식재료명",
-            "1인 제공량(g)\n1~2세", "1인 제공량(g)\n3~5세",
-            "총 발주량\n1~2세", "총 발주량\n3~5세", "만드는방법" };
+    static final Set<String> NO_SCALE_MENUS_NORM = new HashSet<>(Arrays.asList(
+            normalizeForMatch("우유"),
+            normalizeForMatch("두유"),
+            normalizeForMatch("아기용치즈"),
+            normalizeForMatch("호상요구르트"),
+            normalizeForMatch("액상요구르트")
+    ));
 
     /* ===== Template kinds ===== */
     enum TplKind { P12, P35 }
@@ -578,6 +578,7 @@ public class JsonToExcelGeneral {
         int[] widths12 = { 3500, 5500, 5000, 3500, 3500, 6500, 1,1,1,1,1,1 };
 
         int r = startRow;
+        if (startRow > 0) sh.setRowBreak(startRow - 1);
 
         List<String> am = new ArrayList<>();
         List<String> lunchOrig = new ArrayList<>();
@@ -811,13 +812,16 @@ public class JsonToExcelGeneral {
             int r, String label, String rawMenu) {
 
         int partStart = r;
+        boolean noScaleP35 = isNoScaleMenu(rawMenu);
 
         Optional<Block> found = findBlockInTemplateExactPreferNew(tplNew, tplOld, rawMenu, T);
 
         if (found.isEmpty() || found.get().items.isEmpty()) {
             Row row = sh.createRow(r++);
+
             writeOneRow(kind, row, S, label, rawMenu,
-                    "", "", "", "", "", "");
+                    "", "", "", "", "", "",
+                    noScaleP35);
             setBordersRowBasic(kind, row, S);
 
             int methodFirstNF;
@@ -850,7 +854,8 @@ public class JsonToExcelGeneral {
                     menuCell,
                     nz(it.ingredient),
                     nz(it.p12), nz(it.p35), nz(it.t12), nz(it.t35),
-                    methodTop);
+                    methodTop,
+                    noScaleP35);
         }
 
         int partEnd = r - 1;
@@ -904,9 +909,10 @@ public class JsonToExcelGeneral {
 
     /** Write one row with per-template formulas. */
     static void writeOneRow(TplKind kind, Row row, Styles S,
-            String label, String menu, String ing,
-            String p12, String p35, String t12, String t35,
-            String method) {
+                            String label, String menu, String ing,
+                            String p12, String p35, String t12, String t35,
+                            String method,
+                            boolean noScaleP35) {
         row.setHeightInPoints(18);
 
         Cell blankA = row.createCell(0);
@@ -928,7 +934,45 @@ public class JsonToExcelGeneral {
         if (kind == TplKind.P35) {
             Cell d = row.createCell(3 + OUT_COL_OFFSET);
             int excelRow = row.getRowNum() + 1;
-            d.setCellFormula(String.format("F%d*0.65", excelRow));
+
+            if (noScaleP35) {
+                // English comment: No 0.65 scaling for specific menus (milk/soy/cheese/yogurt).
+                // Use p35 value directly (same as 3~5 serving amount).
+                Double p35v = parseNumericOrNull(p35);
+                if (p35v != null) {
+                    double dVal = p35v;
+                    if (isIntegerDouble(dVal)) d.setCellStyle(S.num1);
+                    else {
+                        double one = Math.round(dVal * 10.0) / 10.0;
+                        if (Math.abs(dVal - one) > 1e-9) d.setCellStyle(S.dec1);
+                        else d.setCellStyle(S.num1);
+                    }
+                    // Write numeric
+                    double rounded = Math.round(dVal * 10.0) / 10.0;
+                    if (Math.abs(rounded - Math.rint(rounded)) < 1e-9) d.setCellValue((long) Math.rint(rounded));
+                    else d.setCellValue(rounded);
+                } else {
+                    // If p35 is not numeric, keep blank (avoid #VALUE!).
+                    d.setCellStyle(S.num1);
+                }
+            } else {
+                // Existing behavior: 1~2 = 0.65 * (3~5)
+                d.setCellFormula(String.format("F%d*0.65", excelRow));
+
+                Double p35v = parseNumericOrNull(p35);
+                if (p35v != null) {
+                    double dVal = p35v * 0.65;
+                    if (isIntegerDouble(dVal)) {
+                        d.setCellStyle(S.num1);
+                    } else {
+                        double one = Math.round(dVal * 10.0) / 10.0;
+                        if (Math.abs(dVal - one) > 1e-9) d.setCellStyle(S.dec1);
+                        else d.setCellStyle(S.num1);
+                    }
+                } else {
+                    d.setCellStyle(S.num1);
+                }
+            }
 
             Double p35v = parseNumericOrNull(p35);
             if (p35v != null) {
@@ -1514,6 +1558,11 @@ public class JsonToExcelGeneral {
         //    If you want to keep all top pictures only.
         removePicturesBelowRow(newSh, keepLastRow);
 
+        newSh.setFitToPage(true);
+        PrintSetup ps = newSh.getPrintSetup();
+        ps.setFitWidth((short) 1);
+        ps.setFitHeight((short) 0);
+
         return newSh;
     }
 
@@ -1707,7 +1756,7 @@ public class JsonToExcelGeneral {
         else if (weekIndex == 6) wk = "여섯째";
         else wk = String.valueOf(weekIndex) + "째";
 
-        String sheetName = monthPrefix + " " + wk + "주";
+        String sheetName = monthPrefix.replace(".", ". ") + " " + wk + "주";
 
         if (sheetName.length() > 31) sheetName = sheetName.substring(0, 31);
 
@@ -1724,7 +1773,7 @@ public class JsonToExcelGeneral {
 
     private static String buildBirthdaySheetName(String monthPrefix) {
         // English comment: Build "26.1월 ★birthday"
-        String sheetName = monthPrefix + " ★birthday";
+        String sheetName = monthPrefix.replace(".", ". ") + " ★birthday";
 
         if (sheetName.length() > 31) {
             sheetName = sheetName.substring(0, 31);
@@ -1784,6 +1833,12 @@ public class JsonToExcelGeneral {
         if (mo > 12) mo = 12;
 
         return YearMonth.of(y, mo);
+    }
+
+    static boolean isNoScaleMenu(String menuRaw) {
+        if (menuRaw == null) return false;
+        String n = normalizeForMatch(menuRaw);
+        return NO_SCALE_MENUS_NORM.contains(n);
     }
 
     // New: Convert JSON -> EXCEL with explicit paths (for AllInOne)
