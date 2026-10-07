@@ -65,6 +65,120 @@ mvn clean package
 
 빌드가 성공하면 의존성을 포함한 `target/menu-hwp-to-excel-1.0.0-all.jar`가 생성됩니다. JavaFX 실행 환경과 외부 `input` 폴더도 필요하므로, 이 JAR 하나만 복사하는 것으로 배포가 완료되지는 않습니다.
 
+## Windows EXE 만들기
+
+`mvn javafx:run`은 프로그램을 실행하고, `mvn clean package`는 JAR를 만듭니다. **EXE를 만들려면 아래 `jpackage` 단계까지 실행해야 합니다.**
+
+| 결과물 | 용도 | 추가 도구 |
+| --- | --- | --- |
+| 실행용 EXE 폴더 (`app-image`) | 압축을 풀고 바로 실행 | JDK 21, JavaFX JMODs |
+| 설치용 EXE (`exe`) | 설치 마법사로 프로그램 설치 | 위 도구 + WiX Toolset 3.x |
+
+두 방식 모두 Java 런타임을 포함하므로, 완성된 배포본을 사용하는 PC에 별도로 Java를 설치할 필요는 없습니다. Windows용 패키지는 Windows에서 생성하세요.
+
+### 1. 패키징 준비
+
+- `JAVA_HOME`을 **JDK 21 설치 폴더**로 설정하고 `mvn -version`에서도 같은 JDK를 사용하는지 확인합니다.
+- Windows x64용 **JavaFX 21.0.4 JMODs**를 준비합니다. `pom.xml`의 JavaFX 버전 및 JDK의 아키텍처와 맞추세요. SDK의 `lib` 폴더가 아니라 `.jmod` 파일이 들어 있는 폴더가 필요합니다.
+- 아래 예시의 `$fxJmods`를 실제 JMODs 폴더로 수정합니다.
+- 프로젝트 루트에서 같은 PowerShell 세션으로 순서대로 실행합니다.
+
+JavaFX 배포 파일은 [Gluon JavaFX 다운로드](https://gluonhq.com/products/javafx/)에서 확인할 수 있습니다. 다른 JavaFX 버전을 사용할 경우 Maven 의존성과 JMODs 버전을 함께 맞추세요.
+
+```powershell
+$fxJmods = 'C:\tools\javafx-jmods-21.0.4'
+if (-not $env:JAVA_HOME) { throw 'JAVA_HOME을 JDK 21 설치 폴더로 설정하세요.' }
+$jpackageExe = Join-Path $env:JAVA_HOME 'bin\jpackage.exe'
+if (-not (Test-Path -LiteralPath $jpackageExe)) { throw 'jpackage.exe를 찾을 수 없습니다.' }
+if (-not (Test-Path -LiteralPath (Join-Path $fxJmods 'javafx.controls.jmod'))) {
+    throw 'JavaFX JMODs 폴더를 확인하세요.'
+}
+
+mvn clean package
+if ($LASTEXITCODE -ne 0) { throw 'Maven 빌드 실패' }
+
+# 배포에 필요한 JAR만 별도 폴더에 준비합니다.
+$packageInput = '.\target\package-input'
+New-Item -ItemType Directory -Path $packageInput -Force | Out-Null
+Copy-Item -LiteralPath '.\target\menu-hwp-to-excel-1.0.0-all.jar' -Destination $packageInput
+
+# 다시 실행해도 이전 배포본을 덮어쓰지 않도록 매번 새 경로를 만듭니다.
+$packageStamp = [guid]::NewGuid().ToString('N')
+$portableDest = Join-Path '.\portable' $packageStamp
+```
+
+### 2. 실행용 EXE 폴더 생성
+
+```powershell
+$appArgs = @(
+    '--type', 'app-image',
+    '--name', 'Jungwha_Converter',
+    '--app-version', '1.0.0',
+    '--dest', $portableDest,
+    '--input', $packageInput,
+    '--main-jar', 'menu-hwp-to-excel-1.0.0-all.jar',
+    '--main-class', 'org.example.FxApp',
+    '--icon', '.\icon.ico',
+    '--module-path', "$env:JAVA_HOME\jmods;$fxJmods",
+    '--add-modules', 'java.se,jdk.unsupported,jdk.charsets,javafx.controls,javafx.graphics',
+    '--java-options', '--add-modules=javafx.controls,javafx.graphics',
+    '--java-options', '-Dfile.encoding=UTF-8'
+)
+& $jpackageExe @appArgs
+if ($LASTEXITCODE -ne 0) { throw '실행용 EXE 생성 실패' }
+
+$appImage = Join-Path $portableDest 'Jungwha_Converter'
+Copy-Item -LiteralPath '.\input' -Destination (Join-Path $appImage 'input') -Recurse
+Write-Host "생성 위치: $appImage"
+```
+
+생성된 폴더는 다음 구조입니다.
+
+```text
+portable/<생성된 ID>/Jungwha_Converter/
+├── Jungwha_Converter.exe           # 실행 파일
+├── app/                           # 애플리케이션 JAR 및 설정
+├── runtime/                       # Java 및 JavaFX 런타임
+└── input/                         # Excel 템플릿, 이미지, 식단 예시
+```
+
+`Jungwha_Converter.exe`를 실행한 뒤 예시 HWP가 변환되는지 확인하세요. **EXE 파일만 따로 복사하면 안 됩니다.** `app`, `runtime`, `input`이 들어 있는 `Jungwha_Converter` 폴더 전체를 ZIP으로 묶어 배포합니다.
+
+```powershell
+Compress-Archive -LiteralPath $appImage -DestinationPath (Join-Path $portableDest 'Jungwha_Converter.zip')
+```
+
+### 3. 설치용 EXE 생성 (선택)
+
+설치 마법사가 필요할 때 실행합니다. **앞 단계의 실행용 폴더 생성과 `input` 복사를 먼저 완료**해야 합니다. 이렇게 만들어 둔 앱 이미지를 설치 프로그램에 포함합니다.
+
+JDK 21의 Windows 설치 패키징에는 WiX 도구가 필요합니다. **WiX Toolset 3.x**의 `candle.exe`, `light.exe`를 설치하고 PATH에 추가한 뒤 확인하세요. 실행용 `app-image`만 만들 때는 WiX가 필요하지 않습니다.
+
+```powershell
+Get-Command candle.exe, light.exe -ErrorAction Stop
+
+$installerDest = Join-Path '.\dist' $packageStamp
+$installerArgs = @(
+    '--type', 'exe',
+    '--name', 'Jungwha_Converter',
+    '--app-version', '1.0.0',
+    '--app-image', $appImage,
+    '--dest', $installerDest,
+    '--win-dir-chooser',
+    '--win-menu',
+    '--win-shortcut'
+)
+& $jpackageExe @installerArgs
+if ($LASTEXITCODE -ne 0) { throw '설치용 EXE 생성 실패' }
+Write-Host "설치 파일 위치: $installerDest"
+```
+
+성공하면 `dist/<생성된 ID>/`에 설치용 `.exe`가 생성됩니다. 설치한 프로그램에서 결과를 저장할 때는 문서 폴더 등 쓰기 가능한 위치를 선택하세요.
+
+이 명령은 프로젝트 설정과 패키징 문서를 기준으로 작성한 절차입니다. 실제 배포 전에는 생성된 EXE 실행, HWP 변환, 설치 및 제거 동작을 Windows에서 확인하세요.
+
+참고: [JDK 21 패키징 안내](https://docs.oracle.com/en/java/javase/21/jpackage/packaging-overview.html), [JavaFX 패키징 예제](https://inside.java/2023/11/14/package-javafx-native-exec/).
+
 ## 템플릿과 리소스
 
 `input/`에는 식단 HWP 예시, 연령·유형별 조리지시서 Excel 템플릿, 이미지 리소스가 들어 있습니다.
