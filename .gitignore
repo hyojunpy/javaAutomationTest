@@ -36,3 +36,12 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+# Packaged applications, temporary runtimes, and generated output
+/portable/
+/__fx_test/
+/__rt_test/
+/__jptmp/
+/__pkg/
+/output/
+/dependency-reduced-pom.xml
