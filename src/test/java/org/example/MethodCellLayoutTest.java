@@ -37,13 +37,14 @@ class MethodCellLayoutTest {
             for (var row : book.getSheetAt(0)) assertEquals(18, row.getHeightInPoints());
         }
     }
-    @Test void narrowColumnsWrapEvenWithoutExplicitNewline() throws Exception {
+    @Test void singleSourceLineKeepsOriginalHeightRegardlessOfWidth() throws Exception {
         try (var book = new XSSFWorkbook()) {
             String method = "① 오이를 깨끗하게 씻어서 먹기 좋은 스틱 모양으로 자른 뒤 제공한다.";
             var wide = prepare(book, method, 1, 16);
             var narrow = prepare(book, method, 1, 3);
             MethodCellLayout.fit(book.getSheetAt(0), wide); MethodCellLayout.fit(book.getSheetAt(1), narrow);
-            assertTrue(book.getSheetAt(1).getRow(0).getHeightInPoints() > book.getSheetAt(0).getRow(0).getHeightInPoints());
+            assertEquals(18, book.getSheetAt(0).getRow(0).getHeightInPoints());
+            assertEquals(18, book.getSheetAt(1).getRow(0).getHeightInPoints());
         }
     }
     @Test void longMethodDistributesExtraHeightAndDoesNotShrinkOnRepeat() throws Exception {
@@ -79,10 +80,10 @@ class MethodCellLayoutTest {
     }
     @Test void singleLineKimchiServingNotesKeepOriginalHeight() throws Exception {
         try (var book = new XSSFWorkbook()) {
-            for (String name : java.util.List.of("배추김치⑨", "깍두기⑨", "step3 배추김치⑨")) {
-                var area = prepare(book, "① 배추김치는 1x1cm 이하 크기로 작게 잘라 제공한다.", 1, 3);
+            for (String method : java.util.List.of("① 배추김치는 1x1cm 이하 크기로 작게 잘라 제공한다.", "① 깍두기를 작게 잘라 제공한다.", "① 쌀은 깨끗하게 씻고 적당량의 물을 넣어 밥을 지어 제공한다.")) {
+                var area = prepare(book, method, 1, 3);
                 var sheet = book.getSheetAt(book.getNumberOfSheets() - 1);
-                MethodCellLayout.fit(sheet, area, name);
+                MethodCellLayout.fit(sheet, area);
                 assertEquals(18, sheet.getRow(0).getHeightInPoints());
             }
         }
@@ -91,7 +92,7 @@ class MethodCellLayoutTest {
         try (var book = new XSSFWorkbook()) {
             var area = prepare(book, "① 먹기 좋은 크기로 자른다.\n② 제공한다.", 1, 12);
             var sheet = book.getSheetAt(0);
-            MethodCellLayout.fit(sheet, area, "배추김치⑨");
+            MethodCellLayout.fit(sheet, area);
             assertTrue(sheet.getRow(0).getHeightInPoints() >= 32);
         }
     }
