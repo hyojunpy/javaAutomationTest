@@ -60,6 +60,7 @@ public class HwpToJsonGeneral {
 
     private static final Pattern ALLERGENS      = Pattern.compile("^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]+$");
     private static final Pattern ALLERGENS_TAIL = Pattern.compile("[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]+$");
+    private static final Pattern ALLERGENS_AMP_PREFIX = Pattern.compile("^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]+\\s*&");
     private static final Pattern STEP_PREFIX    = Pattern.compile("(?i)^step\\s*[123]");
 
     private static final List<String> DROP_LINE_HINTS = List.of(
@@ -700,11 +701,12 @@ public class HwpToJsonGeneral {
     }
 
     // ===== menu parsing =====
-    private List<String> splitMenusByLineThenSlash(String rawWithNewlines) {
+    List<String> splitMenusByLineThenSlash(String rawWithNewlines) {
         List<String> out = new ArrayList<>();
         String cleaned = stripSpacesKeepNewlines(rawWithNewlines);
         if (cleaned.isEmpty()) return out;
 
+        int standaloneAllergenIndex = -1;
         for (String line : cleaned.split("\\r?\\n")) {
             String z = line.trim();
             if (z.isEmpty()) continue;
@@ -715,8 +717,11 @@ public class HwpToJsonGeneral {
             }
             if (drop) continue;
 
+            boolean firstPart = true;
             for (String part : z.split("/")) {
                 String v = part.trim();
+                boolean atLineStart = firstPart;
+                firstPart = false;
                 if (v.isEmpty()) continue;
                 if (DROP_TOKENS_MISC.contains(v)) continue;
                 if (DROP_TOKENS_FOODS.contains(v)) continue;
@@ -736,12 +741,24 @@ public class HwpToJsonGeneral {
                     continue;
                 }
 
-                // If item starts with '&', attach to previous menu item
-                if (v.startsWith("&") && !out.isEmpty()) {
+                // A wrapped line can start with the preceding menu's allergens before '&'.
+                // Only the first part of a wrapped line can extend a menu in this cell.
+                boolean allergenContinuation = atLineStart && ALLERGENS_AMP_PREFIX.matcher(v).find();
+                if ((v.startsWith("&") || allergenContinuation) && !out.isEmpty()) {
                     int last = out.size() - 1;
+                    // HWP can wrap the menu, allergens and sauce onto three lines.
+                    if (atLineStart && v.startsWith("&") && last > 0 && standaloneAllergenIndex == last
+                            && ALLERGENS.matcher(out.get(last)).matches()) {
+                        String allergens = out.remove(last);
+                        last--;
+                        out.set(last, out.get(last) + allergens + v);
+                        continue;
+                    }
                     out.set(last, out.get(last) + v);
                 } else {
                     out.add(v);
+                    standaloneAllergenIndex = v.equals(z) && ALLERGENS.matcher(v).matches()
+                            ? out.size() - 1 : -1;
                 }
             }
         }

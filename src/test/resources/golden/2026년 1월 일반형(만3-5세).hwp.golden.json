@@ -80,7 +80,7 @@
     "date" : 14,
     "dateStr" : null,
     "weekday" : "수",
-    "menus" : [ "파인애플", "함박스테이크", "①②⑤⑥⑩⑫⑮⑯⑱&소스①⑤⑥⑩⑫⑮⑯", "쌀밥½", "깍두기⑨", "미니우동⑤⑥⑦⑨⑯⑱", "양상추샐러드②" ],
+    "menus" : [ "파인애플", "함박스테이크①②⑤⑥⑩⑫⑮⑯⑱&소스①⑤⑥⑩⑫⑮⑯", "쌀밥½", "깍두기⑨", "미니우동⑤⑥⑦⑨⑯⑱", "양상추샐러드②" ],
     "pmDesert" : [ "수제비⑤⑥" ],
     "morningCount" : 1
   }, {
@@ -206,7 +206,7 @@
     "xl/drawings/_rels/drawing7.xml.rels" : "3a137c00fc1a6bbbc3073dcc5e39cbb33ba969fa2847c35d16ea5e5884f809d1",
     "xl/drawings/drawing2.xml" : "5b3c5d4bf22c9f17529f2696e8d73ad4f0e2636eb4dfb755efd6408777f6a8ae",
     "xl/drawings/drawing3.xml" : "51397dfac7004df6839a55da3f9f9468cc1ae77969aa043f233cfb6609a42d86",
-    "xl/drawings/drawing4.xml" : "05d989ac7871962abc47b9f5e8bc9ac0da0c1812628fddc4a75b0c4e639d833c",
+    "xl/drawings/drawing4.xml" : "da45886b6684e57590ab7342bd0bc4019900059a0f4c509bc860133e68a30fb9",
     "xl/drawings/drawing5.xml" : "2c29f81e12426ac164cd27ce04b5a2b8afbd28dcfa2b1f21c1c0b3ba1bce9ec6",
     "xl/drawings/drawing6.xml" : "1e444168d665b365105a5b71df24cbb69ad2861338274afface898817096fcd7",
     "xl/drawings/drawing7.xml" : "86fcf0a9441d74564c6398de9544ef84741a4491d4d2e21f84def79d5e2e2e54",
@@ -242,8 +242,8 @@
     "xl/media/image7.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
     "xl/media/image8.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
     "xl/media/image9.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
-    "xl/sharedStrings.xml" : "2db004fcee52a993cdfc5761b19cc76692a68057dbc7a10bcf329f723fd0ea5f",
-    "xl/styles.xml" : "66ad521fea773bafd4cd2c0b3cd367507bdb8369fcbf350f92f969364dce6a5f",
+    "xl/sharedStrings.xml" : "092fe0eea5e59199839eaaaedcffb286794958f17a0a2b7f48a96857f22517fc",
+    "xl/styles.xml" : "ddb5abd794c72baeba53831d7f1a17c7c4bba546afdade50b7abd9eec44be3b3",
     "xl/theme/theme1.xml" : "ffff6491fa7871cea9992aae5c633725336116e9ea2990833782e69300392c9f",
     "xl/workbook.xml" : "d6d2d6a4aa3c6f6f4bd4f3f12a4d9f79b523fdad5f24aac4ddecd577cadd04e1",
     "xl/worksheets/_rels/sheet873.xml.rels" : "772760e83785e4e58268d56f156ef6dae259e80e95e9b164563a502c6ae87f80",
@@ -254,9 +254,9 @@
     "xl/worksheets/_rels/sheet878.xml.rels" : "2034eefeeb9c22341dde87b773d43b43d6c770e02b4b31b3e47341dd6e1a186a",
     "xl/worksheets/sheet873.xml" : "91c02cc2700ec93062187fdffb282ad2602566564dd6b39892ce13e382220d5a",
     "xl/worksheets/sheet874.xml" : "eb61367e98e0587d41fc7734b52d2057f65264d088d1e9b8bf4f5c104635007c",
-    "xl/worksheets/sheet875.xml" : "e98180b1014a2b9e466c36f0ce1f66649b20d61d2d6887ef162f9c87ff088d75",
-    "xl/worksheets/sheet876.xml" : "6996a27a5b7dc110c2550ee878122bfcfe5ad29127f7ddc80cfc47c48c935261",
-    "xl/worksheets/sheet877.xml" : "cf3831bb14c1fbb04fbe025a194f6fd0162e95b6eb5d21f675788c00f717de99",
-    "xl/worksheets/sheet878.xml" : "1ac56c141d79cea9077ab6c4fabb483cdb347c8f0b3244939d2b29e41734bab9"
+    "xl/worksheets/sheet875.xml" : "7db25b9ec434aa198d5381b297a51588ff67a20b08f34549f108d7f8cf6e3374",
+    "xl/worksheets/sheet876.xml" : "9986953ace43f63866744710345f7f40d1c0379fafb4019a22ad1b61a1464b6c",
+    "xl/worksheets/sheet877.xml" : "8681ddacebec952c81b1cde171a68c3f2879cea959c37b7c882267beb57e3513",
+    "xl/worksheets/sheet878.xml" : "d43801da9928dfdedbaa77a14bcb7ff99c5e384db555656b735d4ffe7fd31025"
   }
 }
