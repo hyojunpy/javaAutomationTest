@@ -77,4 +77,22 @@ class MethodCellLayoutTest {
             assertEquals(18, book.getSheetAt(0).getRow(0).getHeightInPoints());
         }
     }
+    @Test void singleLineKimchiServingNotesKeepOriginalHeight() throws Exception {
+        try (var book = new XSSFWorkbook()) {
+            for (String name : java.util.List.of("배추김치⑨", "깍두기⑨", "step3 배추김치⑨")) {
+                var area = prepare(book, "① 배추김치는 1x1cm 이하 크기로 작게 잘라 제공한다.", 1, 3);
+                var sheet = book.getSheetAt(book.getNumberOfSheets() - 1);
+                MethodCellLayout.fit(sheet, area, name);
+                assertEquals(18, sheet.getRow(0).getHeightInPoints());
+            }
+        }
+    }
+    @Test void multilineKimchiStillGetsEnoughHeight() throws Exception {
+        try (var book = new XSSFWorkbook()) {
+            var area = prepare(book, "① 먹기 좋은 크기로 자른다.\n② 제공한다.", 1, 12);
+            var sheet = book.getSheetAt(0);
+            MethodCellLayout.fit(sheet, area, "배추김치⑨");
+            assertTrue(sheet.getRow(0).getHeightInPoints() >= 32);
+        }
+    }
 }

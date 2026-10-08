@@ -334,7 +334,7 @@ public class JsonToExcel {
                 }
             }
 
-            MethodCellLayout.fit(sh, methodMerge);
+            MethodCellLayout.fit(sh, methodMerge, rawMenu);
             if (mode == OutputMode.AGE35) {
                 for (int br = blockStart; br <= blockEnd; br++) {
                     // English comment: B~G should have borders (menu..totals)
