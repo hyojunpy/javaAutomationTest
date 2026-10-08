@@ -39,6 +39,9 @@ import java.util.regex.Pattern;
  */
 public class JsonToExcelGeneral {
     private final Path appHome;
+    private record RecipeAnchor(Sheet sheet, int row) {}
+    private final Map<Workbook, Map<Integer, Map<String, RecipeAnchor>>> recipeIndexes = new IdentityHashMap<>();
+    private final Map<Sheet, TemplateMergedCells> templateMergedCells = new IdentityHashMap<>();
 
     private JsonToExcelGeneral() { this(TemplateCatalog.defaultHome()); }
 
@@ -851,19 +854,26 @@ public class JsonToExcelGeneral {
     /* ===== Template search: exact only ===== */
     Optional<Block> findBlockInTemplateExact(Workbook wb, String menuRaw, TemplateCols T){
         String keyNorm = normalizeForMatch(menuRaw);
+        Map<String, RecipeAnchor> index = recipeIndexes.computeIfAbsent(wb, ignored -> new HashMap<>())
+                .computeIfAbsent(T.colMenu, ignored -> buildRecipeIndex(wb, T.colMenu));
+        RecipeAnchor anchor = index.get(keyNorm);
+        return anchor == null ? Optional.empty() : Optional.of(buildBlockFromAnchor(anchor.sheet(), anchor.row(), T));
+    }
+
+    private Map<String, RecipeAnchor> buildRecipeIndex(Workbook wb, int menuColumn) {
+        Map<String, RecipeAnchor> index = new HashMap<>();
         for (int s = wb.getNumberOfSheets() - 1; s >= 0; s--) {
             Sheet sh = wb.getSheetAt(s);
+            templateMergedCells.computeIfAbsent(sh, TemplateMergedCells::new);
             int lastRow = sh.getLastRowNum();
             for (int r = 0; r <= lastRow; r++) {
-                String cellMenu = readStringConsideringMerged(sh, r, T.colMenu);
+                String cellMenu = readStringConsideringMerged(sh, r, menuColumn);
                 if (isBlank(cellMenu)) continue;
                 String cellNorm = normalizeForMatch(cellMenu);
-                if (!cellNorm.isEmpty() && cellNorm.equals(keyNorm)) {
-                    return Optional.of(buildBlockFromAnchor(sh, r, T));
-                }
+                if (!cellNorm.isEmpty()) index.putIfAbsent(cellNorm, new RecipeAnchor(sh, r));
             }
         }
-        return Optional.empty();
+        return index;
     }
 
     Optional<Block> findBlockInTemplateExactPreferNew(
@@ -1181,6 +1191,8 @@ public class JsonToExcelGeneral {
     String normalizeMenu(String s) { return normalizeForMatch(s); }
 
     CellRangeAddress findMergedRange(Sheet sh, int r, int c){
+        TemplateMergedCells snapshot = templateMergedCells.get(sh);
+        if (snapshot != null) return snapshot.find(r, c);
         for (int i = 0; i < sh.getNumMergedRegions(); i++) {
             CellRangeAddress ra = sh.getMergedRegion(i);
             if (ra.isInRange(r, c)) return ra;
@@ -1195,6 +1207,12 @@ public class JsonToExcelGeneral {
     }
 
     Cell getMergedAnchorCell(Sheet sh, int r, int c){
+        TemplateMergedCells snapshot = templateMergedCells.get(sh);
+        if (snapshot != null) {
+            CellRangeAddress range = snapshot.find(r, c);
+            Row row = sh.getRow(range == null ? r : range.getFirstRow());
+            return row == null ? null : row.getCell(range == null ? c : range.getFirstColumn());
+        }
         for (int i=0;i<sh.getNumMergedRegions();i++){
             CellRangeAddress ra = sh.getMergedRegion(i);
             if (ra.isInRange(r,c)){
