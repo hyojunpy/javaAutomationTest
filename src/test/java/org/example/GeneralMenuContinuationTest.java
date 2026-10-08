@@ -13,6 +13,12 @@ class GeneralMenuContinuationTest {
     private static final String ALLERGENS = "①②⑤⑥⑩⑫⑮⑯⑱";
     private static final String SAUCE = "&소스①⑤⑥⑩⑫⑮⑯";
 
+    @Test void joinsSauceAfterTrailingAmpersand() {
+        assertEquals(List.of("함박스테이크" + ALLERGENS + "&돈까스소스②⑤⑥⑩⑫⑯⑱", "쌀밥"),
+                parser.splitMenusByLineThenSlash("함박스테이크\n" + ALLERGENS + "&\n돈까스소스②⑤⑥⑩⑫⑯⑱/쌀밥"));
+        assertEquals(List.of("돈까스소스"), parser.splitMenusByLineThenSlash("돈까스소스"));
+    }
+
     @Test void joinsWrappedAllergensAndSauceKeepingAllergenNumbers() {
         assertEquals(List.of("함박스테이크" + ALLERGENS + SAUCE, "쌀밥½"),
                 parser.splitMenusByLineThenSlash("함박스테이크\n" + ALLERGENS + SAUCE + "\n쌀밥½"));

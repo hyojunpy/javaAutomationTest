@@ -744,7 +744,9 @@ public class HwpToJsonGeneral {
                 // A wrapped line can start with the preceding menu's allergens before '&'.
                 // Only the first part of a wrapped line can extend a menu in this cell.
                 boolean allergenContinuation = atLineStart && ALLERGENS_AMP_PREFIX.matcher(v).find();
-                if ((v.startsWith("&") || allergenContinuation) && !out.isEmpty()) {
+                boolean followsAmpersand = atLineStart && !out.isEmpty()
+                        && out.get(out.size() - 1).stripTrailing().endsWith("&");
+                if ((v.startsWith("&") || allergenContinuation || followsAmpersand) && !out.isEmpty()) {
                     int last = out.size() - 1;
                     // HWP can wrap the menu, allergens and sauce onto three lines.
                     if (atLineStart && v.startsWith("&") && last > 0 && standaloneAllergenIndex == last

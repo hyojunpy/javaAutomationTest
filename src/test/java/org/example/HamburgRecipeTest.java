@@ -11,6 +11,42 @@ import static org.junit.jupiter.api.Assertions.*;
 class HamburgRecipeTest {
     @TempDir Path home;
 
+    @Test void missingCompoundDoesNotLoadPorkCutletRecipe() throws Exception {
+        Path input = Files.createDirectories(home.resolve("input"));
+        Path template = input.resolve(TemplateCatalog.filename(false, false, true));
+        try (var book = new XSSFWorkbook(); var stream = Files.newOutputStream(template)) {
+            var sheet = book.createSheet("26. 1월 셋째주");
+            for (int r = 0; r < 6; r++) sheet.createRow(r);
+            var row = sheet.createRow(78);
+            row.createCell(2).setCellValue("돈까스&소스②⑤⑥⑩⑫⑯⑱");
+            row.createCell(3).setCellValue("돼지고기");
+            row.createCell(5).setCellValue(40);
+            row.createCell(8).setCellValue("튀긴 후 소스와 함께 제공한다.");
+            book.write(stream);
+        }
+        var menus = new HwpToJsonGeneral().splitMenusByLineThenSlash(
+                "함박스테이크\n①②⑤⑥⑩⑫⑮⑯⑱&\n돈까스소스②⑤⑥⑩⑫⑯⑱");
+        var plan = GoldenFiles.JSON.createArrayNode();
+        var day = plan.addObject(); day.put("date", 14); day.put("weekday", "수"); day.put("morningCount", 0);
+        var list = day.putArray("menus"); menus.forEach(list::add); day.putArray("pmDesert");
+        Path output = home.resolve("missing.xlsx");
+        JsonToExcelGeneral.convertFromJsonString(plan.toString(), Path.of("2026년 1월 일반형(만3-5세).hwp"), output, home);
+        try (var book = WorkbookResources.open(output)) {
+            int count = 0;
+            for (var row : book.getSheetAt(0)) {
+                var cell = row.getCell(2);
+                if (cell == null || cell.getCellType() != org.apache.poi.ss.usermodel.CellType.STRING) continue;
+                String value = cell.getStringCellValue();
+                assertFalse(value.contains("돈까스"));
+                if (!value.equals("함박스테이크")) continue;
+                count++;
+                assertEquals("", row.getCell(3).getStringCellValue());
+                assertEquals("", row.getCell(8).getStringCellValue());
+            }
+            assertEquals(1, count);
+        }
+    }
+
     @Test void correctedMenuLoadsThreeIngredientBlockWithAmountsAndFormulas() throws Exception {
         Path input = Files.createDirectories(home.resolve("input"));
         Path template = input.resolve(TemplateCatalog.filename(false, false, true));

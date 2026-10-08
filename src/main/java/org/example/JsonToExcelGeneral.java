@@ -611,6 +611,14 @@ public class JsonToExcelGeneral {
     }
 
     /** Write one menu block (ingredients rows + method merge). */
+    // Only simplify the display after the complete recipe lookup failed.
+    static String missingMenuDisplayName(String menu) {
+        int amp = menu.indexOf('&');
+        if (amp <= 0 || !menu.substring(amp + 1).contains("소스")) return menu;
+        String main = menu.substring(0, amp).replaceFirst("[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲\\s]+$", "").trim();
+        return main.isEmpty() ? menu : main;
+    }
+
     int writeMenuBlock(Sheet sh, Styles S, Workbook tplNew, Workbook tplOld, TemplateCols T, TplKind kind,
             int r, String label, String rawMenu) {
 
@@ -622,7 +630,7 @@ public class JsonToExcelGeneral {
         if (found.isEmpty() || found.get().items.isEmpty()) {
             Row row = sh.createRow(r++);
 
-            writeOneRow(kind, row, S, label, rawMenu,
+            writeOneRow(kind, row, S, label, missingMenuDisplayName(rawMenu),
                     "", "", "", "", "", "",
                     noScaleP35);
             setBordersRowBasic(kind, row, S);
