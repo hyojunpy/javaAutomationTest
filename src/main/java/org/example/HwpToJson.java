@@ -36,13 +36,15 @@ import java.util.regex.Pattern;
 import java.io.File;
 
 public class HwpToJson {
+    private static final ObjectMapper MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(HwpToJson.class);
     // ===== Input (default) =====
     private static final Path IN_HWP = Paths.get("input", "2026년 1월 시간연장형(만1-2세).hwp");
 
     // ===== Output dir =====
     private static final Path OUT_DIR = Paths.get("output");
 
-    private static HWPFile HWP;
+    private HWPFile HWP;
 
     // “1(월)” like header (tolerate trailing text)
     private static final Pattern DAY_CELL = Pattern.compile("^(\\d{1,2})\\((.)\\)");
@@ -61,8 +63,8 @@ public class HwpToJson {
     private static final Pattern ALLERGENS = Pattern.compile("^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]+$");
 
     // parsed year-month from filename
-    private static Integer PARSED_YEAR = null;
-    private static Integer PARSED_MONTH = null;
+    private Integer PARSED_YEAR = null;
+    private Integer PARSED_MONTH = null;
 
     // ===== Model =====
     public static class DayPlan {
@@ -72,7 +74,7 @@ public class HwpToJson {
         DayPlan(int d, String w){ date = d; weekday = w; }
     }
 
-    public static void main(String[] args) throws Exception {
+    private void runMain(String[] args) throws Exception {
         Path in = (args != null && args.length > 0 && args[0] != null && !args[0].isBlank())
                 ? Paths.get(args[0])
                 : IN_HWP;
@@ -88,9 +90,9 @@ public class HwpToJson {
 
         String inAbs = in.toAbsolutePath().toString();
 
-        System.out.println("[INPUT ] " + in.toAbsolutePath());
-        System.out.println("[OUTPUT] " + outJson.toAbsolutePath());
-        System.out.println("[DEBUG ] " + outTsv.toAbsolutePath());
+        LOG.debug("[INPUT ] " + in.toAbsolutePath());
+        LOG.debug("[OUTPUT] " + outJson.toAbsolutePath());
+        LOG.debug("[DEBUG ] " + outTsv.toAbsolutePath());
 
         HWP = HWPReader.fromFile(inAbs);
 
@@ -121,11 +123,11 @@ public class HwpToJson {
         new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT)
                 .writeValue(outJson.toFile(), list);
 
-        System.out.println("[OK] JSON written -> " + outJson.toAbsolutePath());
+        LOG.debug("[OK] JSON written -> " + outJson.toAbsolutePath());
     }
 
     // ====== scan a table (dinner only) ======
-    private static void scanTable(ControlTable ct, Map<Integer, DayPlan> byDate, Path outTsv) throws IOException {
+    private void scanTable(ControlTable ct, Map<Integer, DayPlan> byDate, Path outTsv) throws IOException {
         List<Row> rows = ct.getRowList();
         if (rows == null || rows.isEmpty()) return;
 
@@ -175,7 +177,7 @@ public class HwpToJson {
     }
 
     // apply dinner rows to dates of header
-    private static void flushDinnerBlock(List<String> header, List<Row> dinnerRows, Map<Integer, DayPlan> byDate) throws IOException {
+    private void flushDinnerBlock(List<String> header, List<Row> dinnerRows, Map<Integer, DayPlan> byDate) throws IOException {
         if (header == null || header.size() <= 1) return;
 
         int cStart = findFirstUsableHeaderIndex(header);
@@ -225,7 +227,7 @@ public class HwpToJson {
     }
 
     // probe nearby columns to find any non-empty cell
-    private static int probeBestBodyCol(List<Row> dinnerRows, int centerCol, int radius) throws IOException {
+    private int probeBestBodyCol(List<Row> dinnerRows, int centerCol, int radius) throws IOException {
         int best = centerCol;
         if (hasAnyTextAtCol(dinnerRows, centerCol)) return centerCol;
 
@@ -240,7 +242,7 @@ public class HwpToJson {
         return best;
     }
 
-    private static boolean hasAnyTextAtCol(List<Row> rows, int col) throws IOException {
+    private boolean hasAnyTextAtCol(List<Row> rows, int col) throws IOException {
         if (rows == null || rows.isEmpty()) return false;
         for (Row r : rows) {
             String label = readCellFlat(r, 0);
@@ -252,7 +254,7 @@ public class HwpToJson {
     }
 
     // collect all dinner menus for one column
-    private static List<String> collectDinnerMenus(List<Row> dinnerRows, int col) throws IOException {
+    private List<String> collectDinnerMenus(List<Row> dinnerRows, int col) throws IOException {
         List<String> out = new ArrayList<>();
         if (dinnerRows == null || dinnerRows.isEmpty()) return out;
 
@@ -269,13 +271,13 @@ public class HwpToJson {
     }
 
     // ===== helpers =====
-    private static boolean isDinnerLabel(String firstCol) {
+    private boolean isDinnerLabel(String firstCol) {
         if (firstCol == null) return false;
         String t = firstCol.replaceAll("\\s+", ""); // spaces + newlines collapsed
         return t.contains("저녁") || t.contains("저녁간식") || t.contains("저녘") || t.contains("저녀");
     }
 
-    private static List<String> reattachLineSplitAllergens(List<String> items) {
+    private List<String> reattachLineSplitAllergens(List<String> items) {
         List<String> out = new ArrayList<>();
         if (items == null) return out;
         for (String it : items) {
@@ -297,7 +299,7 @@ public class HwpToJson {
         return out;
     }
 
-    private static int effectiveMenuCol(int headerColIndex, List<String> header) {
+    private int effectiveMenuCol(int headerColIndex, List<String> header) {
         int usableOrdinal = 0;
         for (int i = 1; i <= headerColIndex && i < header.size(); i++) {
             String h = stripSpacesFlat(header.get(i));
@@ -310,7 +312,7 @@ public class HwpToJson {
         return mapped;
     }
 
-    private static int findFirstUsableHeaderIndex(List<String> header) {
+    private int findFirstUsableHeaderIndex(List<String> header) {
         if (header == null || header.size() <= 1) return -1;
         for (int i = 1; i < header.size(); i++) {
             String h = stripSpacesFlat(header.get(i));
@@ -321,7 +323,7 @@ public class HwpToJson {
         return -1;
     }
 
-    private static boolean isHolidayHeader(String headerFlat) {
+    private boolean isHolidayHeader(String headerFlat) {
         if (headerFlat == null) return false;
         String h = headerFlat.toLowerCase(Locale.ROOT).replace(" ", "");
         if (h.contains("대체휴일")) return true;
@@ -342,7 +344,7 @@ public class HwpToJson {
         return false;
     }
 
-    private static int[] parseYearMonthFromFilename(String fileName) {
+    private int[] parseYearMonthFromFilename(String fileName) {
         Pattern p = Pattern.compile("^(\\d{4})년\\s*(\\d{1,2})월\\s*시간연장형\\(만\\d+(?:-\\d+)?세\\)\\.hwp$");
         Matcher m = p.matcher(fileName);
         if (m.find()) {
@@ -351,7 +353,7 @@ public class HwpToJson {
         return null;
     }
 
-    private static String derivePrettyBasename(String fileName) {
+    private String derivePrettyBasename(String fileName) {
         Pattern p = Pattern.compile("^(\\d{4})년\\s*(\\d{1,2})월\\s*시간연장형\\(만(\\d+(?:-\\d+)?)세\\)\\.hwp$");
         Matcher m = p.matcher(fileName);
         if (m.find()) {
@@ -365,7 +367,7 @@ public class HwpToJson {
         return (dot > 0) ? fileName.substring(0, dot) : fileName;
     }
 
-    private static String safeDowKorean(int year, int month, int day) {
+    private String safeDowKorean(int year, int month, int day) {
         try {
             DayOfWeek dow = LocalDate.of(year, month, day).getDayOfWeek();
             switch (dow) {
@@ -382,7 +384,7 @@ public class HwpToJson {
     }
 
     // ===== text extractors =====
-    private static String cellText(Cell cell) throws IOException {
+    private String cellText(Cell cell) throws IOException {
         ParagraphListInterface plis = cell.getParagraphList();
         if (plis == null || plis.getParagraphCount() == 0) return "";
 
@@ -419,7 +421,7 @@ public class HwpToJson {
         return out.toString();
     }
 
-    private static String fallbackPlainRuns(Paragraph p) throws UnsupportedEncodingException {
+    private String fallbackPlainRuns(Paragraph p) throws UnsupportedEncodingException {
         if (p == null || p.getText() == null) return "";
         StringBuilder sb = new StringBuilder();
         for (HWPChar ch : p.getText().getCharList()) {
@@ -429,7 +431,7 @@ public class HwpToJson {
         return sb.toString();
     }
 
-    private static String stripSpacesKeepNewlines(String s) {
+    private String stripSpacesKeepNewlines(String s) {
         if (s == null) return "";
         String t = s
                 .replace('\u00A0', ' ')
@@ -449,7 +451,7 @@ public class HwpToJson {
         return out.toString();
     }
 
-    private static String stripSpacesFlat(String s) {
+    private String stripSpacesFlat(String s) {
         if (s == null) return "";
         String t = s
                 .replace('\n', ' ')
@@ -463,7 +465,7 @@ public class HwpToJson {
         return SPACES_ONLY.matcher(t).replaceAll(" ").trim();
     }
 
-    private static List<String> splitMenusByLineThenSlash(String rawWithNewlines) {
+    private List<String> splitMenusByLineThenSlash(String rawWithNewlines) {
         List<String> out = new ArrayList<>();
         String cleaned = stripSpacesKeepNewlines(rawWithNewlines);
         if (cleaned.isEmpty()) return out;
@@ -489,28 +491,28 @@ public class HwpToJson {
         return out;
     }
 
-    private static String readCellFlat(Row row, int col) throws IOException {
+    private String readCellFlat(Row row, int col) throws IOException {
         if (row == null || row.getCellList() == null) return "";
         List<Cell> cells = row.getCellList();
         if (col < 0 || col >= cells.size()) return "";
         return stripSpacesFlat(cellText(cells.get(col)));
     }
 
-    private static String readCellKeepNewlines(Row row, int col) throws IOException {
+    private String readCellKeepNewlines(Row row, int col) throws IOException {
         if (row == null || row.getCellList() == null) return "";
         List<Cell> cells = row.getCellList();
         if (col < 0 || col >= cells.size()) return "";
         return stripSpacesKeepNewlines(cellText(cells.get(col)));
     }
 
-    private static List<String> collectRowTextsFlat(Row row) throws IOException {
+    private List<String> collectRowTextsFlat(Row row) throws IOException {
         List<String> vals = new ArrayList<>();
         if (row.getCellList() == null) return vals;
         for (int i = 0; i < row.getCellList().size(); i++) vals.add(readCellFlat(row, i));
         return vals;
     }
 
-    private static void dumpTableTsv(List<Row> rows, Path outTsv) {
+    private void dumpTableTsv(List<Row> rows, Path outTsv) {
         try (PrintWriter pw = new PrintWriter(Files.newBufferedWriter(outTsv))) {
             for (Row r : rows) {
                 List<String> cols = new ArrayList<>();
@@ -526,44 +528,17 @@ public class HwpToJson {
     }
 
     // New: Convert with explicit output path
-    public static Path convert(Path inputHwpPath, Path outputJsonPath) throws Exception {
+    private Path doConvert(Path inputHwpPath, Path outputJsonPath) throws Exception {
         if (inputHwpPath == null) throw new IllegalArgumentException("inputHwpPath is null");
         if (outputJsonPath == null) throw new IllegalArgumentException("outputJsonPath is null");
-
-        // Ensure output dir exists
         Path parent = outputJsonPath.toAbsolutePath().getParent();
         if (parent != null) Files.createDirectories(parent);
-
-        int[] ym = parseYearMonthFromFilename(inputHwpPath.getFileName().toString());
-        if (ym != null) { PARSED_YEAR = ym[0]; PARSED_MONTH = ym[1]; }
-        else { PARSED_YEAR = null; PARSED_MONTH = null; }
-
-        String inAbs = inputHwpPath.toAbsolutePath().toString();
-        HWP = HWPReader.fromFile(inAbs);
-
-        Map<Integer, DayPlan> byDate = new LinkedHashMap<>();
-
-        // scan all sections/paragraphs; process ControlType.Table only
-        for (int s = 0; s < HWP.getBodyText().getSectionList().size(); s++) {
-            Section sec = HWP.getBodyText().getSectionList().get(s);
-            for (int p = 0; p < sec.getParagraphCount(); p++) {
-                Paragraph para = sec.getParagraph(p);
-                if (para.getControlList() == null) continue;
-                for (Control c : para.getControlList()) {
-                    if (c.getType() != ControlType.Table) continue;
-                    ControlTable ct = (ControlTable) c;
-                    // outTsv는 convert에서는 만들지 않고 null로 넘겨도 됨(현재 scanTable에서 실제로 사용 안 함)
-                    scanTable(ct, byDate, null);
-                }
-            }
-        }
-
+        List<DayPlan> list = parse(inputHwpPath);
         // finalize: ensure non-empty menus
-        for (DayPlan dp : byDate.values()) {
+        for (DayPlan dp : list) {
             if (dp.menus == null || dp.menus.isEmpty()) dp.menus = List.of("없음");
         }
 
-        List<DayPlan> list = new ArrayList<>(byDate.values());
         list.sort(Comparator.comparingInt(dp -> dp.date));
 
         new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT)
@@ -575,13 +550,17 @@ public class HwpToJson {
 
 
     // English comment: Convert HWP to JSON string without writing intermediate JSON file
-    public static String convertToJsonString(File hwpFile) throws Exception {
+    private String doConvertToJsonString(File hwpFile) throws Exception {
         if (hwpFile == null) throw new IllegalArgumentException("hwpFile is null");
-        return convertToJsonString(hwpFile.toPath());
+        return doConvertToJsonString(hwpFile.toPath());
     }
 
     // English comment: Convert HWP to JSON string without writing intermediate JSON file
-    public static String convertToJsonString(Path inputHwpPath) throws Exception {
+    private String doConvertToJsonString(Path inputHwpPath) throws Exception {
+        return MAPPER.writeValueAsString(parse(inputHwpPath));
+    }
+
+    private List<DayPlan> parse(Path inputHwpPath) throws Exception {
         if (inputHwpPath == null) throw new IllegalArgumentException("inputHwpPath is null");
 
         int[] ym = parseYearMonthFromFilename(inputHwpPath.getFileName().toString());
@@ -610,9 +589,24 @@ public class HwpToJson {
         List<DayPlan> list = new ArrayList<>(byDate.values());
         list.sort(Comparator.comparingInt(dp -> dp.date));
 
-        return new ObjectMapper()
-                .enable(SerializationFeature.INDENT_OUTPUT)
-                .writeValueAsString(list);
+        return list;
+    }
+
+
+    public static void main(String[] args) throws Exception {
+        new HwpToJson().runMain(args);
+    }
+
+    public static Path convert(Path inputHwpPath, Path outputJsonPath) throws Exception {
+        return new HwpToJson().doConvert(inputHwpPath, outputJsonPath);
+    }
+
+    public static String convertToJsonString(File hwpFile) throws Exception {
+        return new HwpToJson().doConvertToJsonString(hwpFile);
+    }
+
+    public static String convertToJsonString(Path inputHwpPath) throws Exception {
+        return new HwpToJson().doConvertToJsonString(inputHwpPath);
     }
 
 }

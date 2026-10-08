@@ -41,20 +41,9 @@ public class AllInOne {
             Files.createDirectories(outXlsx.getParent());
         }
 
-        // ✅ 판별 기준: 파일명에 "시간연장" 포함 여부
-        boolean isExtended = inputHwp.getFileName().toString().contains("시간연장");
-
         System.out.println("[INPUT ] " + inputHwp);
         System.out.println("[OUTPUT] " + outXlsx);
-        System.out.println("[MODE  ] " + (isExtended ? "EXTENDED" : "GENERAL"));
-
-        if (isExtended) {
-            String json = HwpToJson.convertToJsonString(inputHwp.toFile());
-            JsonToExcel.convertFromJsonString(json, inputHwp, outXlsx);
-        } else {
-            String json = HwpToJsonGeneral.convertToJsonString(inputHwp.toFile());
-            JsonToExcelGeneral.convertFromJsonString(json, inputHwp, outXlsx);
-        }
+        new ConversionEngine(TemplateCatalog.defaultHome()).convert(inputHwp, outXlsx, System.out::println);
 
         System.out.println("DONE");
     }
@@ -67,11 +56,6 @@ public class AllInOne {
     }
 
     private static String makeOutName(String inputFileName) {
-        String stem = inputFileName;
-        int dot = stem.lastIndexOf('.');
-        if (dot > 0) {
-            stem = stem.substring(0, dot);
-        }
-        return stem + "_수정.xlsx";
+        return SourceMetadata.outputName(inputFileName);
     }
 }

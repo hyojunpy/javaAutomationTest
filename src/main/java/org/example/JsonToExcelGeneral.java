@@ -38,17 +38,19 @@ import java.util.regex.Pattern;
  * - Sheet naming based on inferred YearMonth from input file name
  */
 public class JsonToExcelGeneral {
+    private final Path appHome;
+
+    private JsonToExcelGeneral() { this(TemplateCatalog.defaultHome()); }
+
+    private JsonToExcelGeneral(Path appHome) { this.appHome = appHome.toAbsolutePath(); }
+
 
     /* ===== Paths ===== */
     // English comment: Default is only fallback when no args are provided
     static final Path JSON_PLAN = Paths.get("output/26.01. 만3-5세 일반형.json");
 
     // English comment: Template filenames (resolved under app.home/input first)
-    static final String TEMPLATE_12_NAME = "2022~2025 조리지시서(만1-2세 일반형).xlsx";
-    static final String TEMPLATE_35_NAME = "2022~2025 조리지시서(만3-5세 일반형).xlsx";
 
-    static final String TEMPLATE_12_NAME_2026 = "★2026~조리지시서(만1-2세 일반형).xlsx";
-    static final String TEMPLATE_35_NAME_2026 = "★2026~조리지시서(만3-5세 일반형).xlsx";
 
     static final Set<String> NO_SCALE_MENUS_NORM = new HashSet<>(Arrays.asList(
             normalizeForMatch("우유"),
@@ -61,10 +63,10 @@ public class JsonToExcelGeneral {
     /* ===== Template kinds ===== */
     enum TplKind { P12, P35 }
 
-    static final Map<String, CellStyle> BORDER_STYLE_CACHE = new HashMap<>();
+    final Map<String, CellStyle> BORDER_STYLE_CACHE = new HashMap<>();
 
     /* ===== Week Sheet Name ===== */
-    static String weekNameKorean(int weekIndex) {
+    String weekNameKorean(int weekIndex) {
         if (weekIndex == 1) return "첫째주";
         if (weekIndex == 2) return "둘째주";
         if (weekIndex == 3) return "셋째주";
@@ -75,7 +77,7 @@ public class JsonToExcelGeneral {
 
     static final int OUT_COL_OFFSET = 1;
 
-    static String makeWeekSheetName(YearMonth ym, int weekIndex) {
+    String makeWeekSheetName(YearMonth ym, int weekIndex) {
         // English comment: Month should not be zero-padded. Format: "26. 1월 첫째주"
         return String.format(
                 "%02d. %d월 %s",
@@ -85,7 +87,7 @@ public class JsonToExcelGeneral {
         );
     }
 
-    static String makeBirthdaySheetName(YearMonth ym) {
+    String makeBirthdaySheetName(YearMonth ym) {
         return String.format(
                 "%02d. %d월 ★birthday",
                 ym.getYear() % 100,
@@ -93,7 +95,7 @@ public class JsonToExcelGeneral {
         );
     }
 
-    static boolean isWeekEndGeneral(String weekday) {
+    boolean isWeekEndGeneral(String weekday) {
         if (weekday == null) return false;
         String w = weekday.trim();
         if (w.length() == 0) return false;
@@ -109,13 +111,13 @@ public class JsonToExcelGeneral {
         }
     }
 
-    static TplKind detectTplKind(Path tplPath) {
+    TplKind detectTplKind(Path tplPath) {
         String name = tplPath.getFileName().toString().toLowerCase(Locale.ROOT);
         if (name.contains("만1-2") || name.contains("1-2세")) return TplKind.P12;
         return TplKind.P35;
     }
 
-    static TemplateCols colsOf(TplKind kind) {
+    TemplateCols colsOf(TplKind kind) {
         if (kind == TplKind.P12) {
             // 템플릿에서 A열이 공백 → 모든 참조 열을 +1 이동
             // C=menu, D=ing, E=p12, (no p35), F=t12, (no t35), I..M method
@@ -325,7 +327,7 @@ public class JsonToExcelGeneral {
     }
 
     /* ===== Main ===== */
-    public static void main(String[] args) throws Exception {
+    private void runMain(String[] args) throws Exception {
         ZipSecureFile.setMinInflateRatio(0.0d);
         ZipSecureFile.setMaxFileCount(20000);
 
@@ -344,227 +346,28 @@ public class JsonToExcelGeneral {
             outXlsx = deriveOutXlsxPathFromJson(jsonPlan, Paths.get("output")).toAbsolutePath();
         }
 
-        YearMonth ym = inferYMFromJson(jsonPlan);
-        String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
-
-        // English comment: Resolve template under app.home/input first, then fallback to ./input
-        Path tplFile = resolveGeneralTemplate(jsonPlan);
-        Path tplNewPath = resolveGeneralTemplateNew(jsonPlan);
-        Path tplOldPath = resolveGeneralTemplateOld(jsonPlan);
-
-        TplKind tplKind = detectTplKind(tplFile);
-        TemplateCols T = colsOf(tplKind);
-
-        List<DayPlan> plan = readPlan(jsonPlan);
-
-        if (outXlsx.getParent() != null) Files.createDirectories(outXlsx.getParent());
-
-        Workbook tplNew = null;
-        Workbook tplOld = null;
-
-
-        try (Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
-
-            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
-            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
-
-
-            // English comment: Split normal days and birthday days
-            List<DayPlan> normalDays = new ArrayList<>();
-            List<DayPlan> birthdayDays = new ArrayList<>();
-
-            for (DayPlan d : plan) {
-                if (d == null) continue;
-                String ds = nz(d.dateStr).trim();
-                if (ds.equalsIgnoreCase("birthday")) birthdayDays.add(d);
-                else normalDays.add(d);
-            }
-            int weekIndex = 1;
-
-            String baseName = out.getSheetName(0);
-
-            // Keep only base sheet in template workbook
-            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
-                String nm = out.getSheetName(i);
-                if (!baseName.equals(nm)) out.removeSheetAt(i);
-            }
-
-            // Re-find baseIdx (it will be 0 after pruning)
-            int baseIdx = out.getSheetIndex(baseName);
-            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
-            Styles S = Styles.build(out);
-
-            int DATA_START_ROW;
-            if (tplKind == TplKind.P12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
-            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
-
-            int keepLastRow = DATA_START_ROW - 1;
-
-            Sheet sh = copyTopTemplateArea(
-                    out,
-                    baseIdx,
-                    makeWeekSheetName(ym, weekIndex),
-                    keepLastRow
-            );
-
-            int currentRow = DATA_START_ROW;
-
-            for (int i = 0; i < normalDays.size(); i++) {
-                DayPlan d = normalDays.get(i);
-                if (d == null) continue;
-                if (d.date == null) continue;
-
-                int beforeRow = currentRow;
-
-                currentRow = writeOneDay(sh, S, d, tplNew, tplOld, T, tplKind, titlePrefix, currentRow, false);
-
-                if (currentRow > beforeRow) {
-                    currentRow = currentRow + 1;
-                }
-
-
-                if (isWeekEndGeneral(d.weekday)) {
-                    if (i < normalDays.size() - 1) {
-                        weekIndex = weekIndex + 1;
-
-                        sh = copyTopTemplateArea(
-                                out,
-                                baseIdx,
-                                makeWeekSheetName(ym, weekIndex),
-                                keepLastRow
-                        );
-
-                        currentRow = DATA_START_ROW;
-                    }
-                }
-            }
-
-            // English comment: Birthday dedicated sheet
-            if (!birthdayDays.isEmpty()) {
-                keepLastRow = DATA_START_ROW - 1;
-
-                Sheet bdaySheet = copyTopTemplateArea(
-                        out,
-                        baseIdx,
-                        makeBirthdaySheetName(ym),
-                        keepLastRow
-                );
-
-                int r = DATA_START_ROW;
-
-                for (DayPlan d : birthdayDays) {
-                    r = writeOneDay(bdaySheet, S, d, tplNew, tplOld, T, tplKind, titlePrefix, r, true);
-                    r = r + 4; // Birthday는 하루 블록 간격을 넉넉히
-                }
-            }
-
-            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
-            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
-
-            try (OutputStream os = Files.newOutputStream(outXlsx)) {
-                out.write(os);
-            }
-
-        }finally {
-            // English comment: Close lookup workbooks if created
-            if (tplNew != null) tplNew.close();
-            if (tplOld != null) tplOld.close();
-        }
-
+        doConvert(jsonPlan, outXlsx);
         System.out.println("DONE → " + outXlsx.toAbsolutePath());
     }
 
     // English comment: Resolve template path for general mode (installed app location first)
-    static Path resolveGeneralTemplate(Path jsonPlan) throws Exception {
-        String jsonName = jsonPlan.getFileName().toString();
-        boolean is12 = jsonName.contains("만1-2");
-
-        Path appHome = getAppHomeDir();
-        Path inputDir = appHome.resolve("input");
-        Path candidate;
-
-        if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME_2026);
-        else candidate = inputDir.resolve(TEMPLATE_35_NAME_2026);
-
-        if (Files.exists(candidate)) return candidate;
-
-        if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME);
-        else candidate = inputDir.resolve(TEMPLATE_35_NAME);
-
-        if (Files.exists(candidate)) return candidate;
-
-        // Fallback: current working directory ./input
-        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
-        // English comment: Prefer 2026~ template if exists, otherwise fallback to 2022~2025
-        if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME_2026);
-        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME_2026);
-
-        if (Files.exists(candidate)) return candidate;
-
-        if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME);
-        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME);
-
-        if (Files.exists(candidate)) return candidate;
-
-
-        throw new IllegalStateException("Template not found: " + candidate.toAbsolutePath());
+    Path resolveGeneralTemplate(Path jsonPlan) throws Exception {
+        return new TemplateCatalog(appHome).base(false, SourceMetadata.from(jsonPlan).generalAge12());
     }
 
-    static Path resolveGeneralTemplateNew(Path jsonPlan) throws Exception {
-        String jsonName = jsonPlan.getFileName().toString();
-        boolean is12 = jsonName.contains("만1-2");
-
-        Path appHome = getAppHomeDir();
-        Path inputDir = appHome.resolve("input");
-
-        Path candidate;
-        if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME_2026);
-        else candidate = inputDir.resolve(TEMPLATE_35_NAME_2026);
-
-        if (Files.exists(candidate)) return candidate;
-
-        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
-        if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME_2026);
-        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME_2026);
-
-        if (Files.exists(candidate)) return candidate;
-
-        return null;
+    Path resolveGeneralTemplateNew(Path jsonPlan) throws Exception {
+        return new TemplateCatalog(appHome).newer(false, SourceMetadata.from(jsonPlan).generalAge12());
     }
 
-    static Path resolveGeneralTemplateOld(Path jsonPlan) throws Exception {
-        String jsonName = jsonPlan.getFileName().toString();
-        boolean is12 = jsonName.contains("만1-2");
-
-        Path appHome = getAppHomeDir();
-        Path inputDir = appHome.resolve("input");
-
-        Path candidate;
-        if (is12) candidate = inputDir.resolve(TEMPLATE_12_NAME);
-        else candidate = inputDir.resolve(TEMPLATE_35_NAME);
-
-        if (Files.exists(candidate)) return candidate;
-
-        Path fallbackDir = Paths.get("").toAbsolutePath().resolve("input");
-        if (is12) candidate = fallbackDir.resolve(TEMPLATE_12_NAME);
-        else candidate = fallbackDir.resolve(TEMPLATE_35_NAME);
-
-        if (Files.exists(candidate)) return candidate;
-
-        return null;
+    Path resolveGeneralTemplateOld(Path jsonPlan) throws Exception {
+        return new TemplateCatalog(appHome).older(false, SourceMetadata.from(jsonPlan).generalAge12());
     }
 
     // English comment: Get app home directory for packaged app
-    static Path getAppHomeDir() {
-        String home = System.getProperty("app.home");
-        if (home != null && home.trim().length() > 0) {
-            return Paths.get(home).toAbsolutePath();
-        }
-        return Paths.get("").toAbsolutePath();
-    }
+    Path getAppHomeDir() { return appHome; }
 
     /* ===== One day block (stacked by rows) ===== */
-    static int writeOneDay(Sheet sh, Styles S, DayPlan d,
+    int writeOneDay(Sheet sh, Styles S, DayPlan d,
             Workbook tplNew, Workbook tplOld, TemplateCols T, TplKind kind,
             String titlePrefix, int startRow, boolean isBirthday) {
 
@@ -808,7 +611,7 @@ public class JsonToExcelGeneral {
     }
 
     /** Write one menu block (ingredients rows + method merge). */
-    static int writeMenuBlock(Sheet sh, Styles S, Workbook tplNew, Workbook tplOld, TemplateCols T, TplKind kind,
+    int writeMenuBlock(Sheet sh, Styles S, Workbook tplNew, Workbook tplOld, TemplateCols T, TplKind kind,
             int r, String label, String rawMenu) {
 
         int partStart = r;
@@ -883,13 +686,13 @@ public class JsonToExcelGeneral {
     }
 
     /** Merge label in column col for range [start..end]. */
-    static void mergeLabel(Sheet sh, int start, int end, int col){
+    void mergeLabel(Sheet sh, int start, int end, int col){
         if (end <= start) return;
         addMergeSafe(sh, new CellRangeAddress(start, end, col, col));
     }
 
     /** Safe merge: remove overlapping merged regions first, then add. */
-    static void addMergeSafe(Sheet sh, CellRangeAddress target){
+    void addMergeSafe(Sheet sh, CellRangeAddress target){
         List<Integer> toRemove = new ArrayList<>();
         for (int i = 0; i < sh.getNumMergedRegions(); i++) {
             CellRangeAddress ex = sh.getMergedRegion(i);
@@ -901,14 +704,14 @@ public class JsonToExcelGeneral {
         setMergedBorder(sh, target, BorderStyle.THIN);
     }
 
-    static boolean rangesOverlap(CellRangeAddress a, CellRangeAddress b){
+    boolean rangesOverlap(CellRangeAddress a, CellRangeAddress b){
         boolean rowOverlap = a.getFirstRow() <= b.getLastRow() && b.getFirstRow() <= a.getLastRow();
         boolean colOverlap = a.getFirstColumn() <= b.getLastColumn() && b.getFirstColumn() <= a.getLastColumn();
         return rowOverlap && colOverlap;
     }
 
     /** Write one row with per-template formulas. */
-    static void writeOneRow(TplKind kind, Row row, Styles S,
+    void writeOneRow(TplKind kind, Row row, Styles S,
                             String label, String menu, String ing,
                             String p12, String p35, String t12, String t35,
                             String method,
@@ -1028,7 +831,7 @@ public class JsonToExcelGeneral {
         }
     }
 
-    static void setBordersRowBasic(TplKind kind, Row row, Styles S){
+    void setBordersRowBasic(TplKind kind, Row row, Styles S){
         int lastCol;
         if (kind == TplKind.P35) lastCol = 6;
         else lastCol = 4;
@@ -1037,7 +840,7 @@ public class JsonToExcelGeneral {
     }
 
     /* ===== Template search: exact only ===== */
-    static Optional<Block> findBlockInTemplateExact(Workbook wb, String menuRaw, TemplateCols T){
+    Optional<Block> findBlockInTemplateExact(Workbook wb, String menuRaw, TemplateCols T){
         String keyNorm = normalizeForMatch(menuRaw);
         for (int s = wb.getNumberOfSheets() - 1; s >= 0; s--) {
             Sheet sh = wb.getSheetAt(s);
@@ -1054,7 +857,7 @@ public class JsonToExcelGeneral {
         return Optional.empty();
     }
 
-    static Optional<Block> findBlockInTemplateExactPreferNew(
+    Optional<Block> findBlockInTemplateExactPreferNew(
             Workbook tplNew,
             Workbook tplOld,
             String menuRaw,
@@ -1073,7 +876,7 @@ public class JsonToExcelGeneral {
     }
 
     /** Build block starting from menu anchor row. */
-    static Block buildBlockFromAnchor(Sheet sh, int r, TemplateCols T){
+    Block buildBlockFromAnchor(Sheet sh, int r, TemplateCols T){
         int lastRow = sh.getLastRowNum();
         String cellMenu = readStringConsideringMerged(sh, r, T.colMenu);
 
@@ -1134,7 +937,7 @@ public class JsonToExcelGeneral {
     }
 
     /* ===== Utils ===== */
-    static List<String> compressConsecutive(List<String> src){
+    List<String> compressConsecutive(List<String> src){
         if (src == null || src.isEmpty()) return new ArrayList<>();
         List<String> out = new ArrayList<>();
         String prev = null;
@@ -1152,14 +955,14 @@ public class JsonToExcelGeneral {
         return out;
     }
 
-    static boolean isKimchi(String menu){
+    boolean isKimchi(String menu){
         String k = normalizeMenu(menu);
         if (k.contains("김치")) return true;
         if (k.contains("깍두기")) return true;
         return false;
     }
 
-    static Path deriveOutXlsxPathFromJson(Path jsonPath, Path outDir){
+    Path deriveOutXlsxPathFromJson(Path jsonPath, Path outDir){
         String file = jsonPath.getFileName().toString();
         String stem = file.contains(".") ? file.substring(0, file.lastIndexOf('.')) : file;
         String outBase = stem + "_수정";
@@ -1170,7 +973,7 @@ public class JsonToExcelGeneral {
         return outDir.resolve(outBase + ".xlsx");
     }
 
-    static YearMonth inferYMFromJson(Path jsonPath) {
+    YearMonth inferYMFromJson(Path jsonPath) {
         String name = jsonPath.getFileName().toString();
 
         Pattern pYY = Pattern.compile("^(\\d{2})\\.(\\d{1,2})");
@@ -1196,7 +999,7 @@ public class JsonToExcelGeneral {
         return YearMonth.from(LocalDate.now());
     }
 
-    static List<DayPlan> readPlan(Path json) throws IOException {
+    List<DayPlan> readPlan(Path json) throws IOException {
         ObjectMapper om = new ObjectMapper();
         try (var is = Files.newInputStream(json)) {
             return om.readValue(is, new TypeReference<List<DayPlan>>() {});
@@ -1205,14 +1008,21 @@ public class JsonToExcelGeneral {
 
 
     // English comment: Read plan list from JSON string (no intermediate JSON file)
-    static List<DayPlan> readPlanFromString(String jsonString) throws IOException {
+    List<DayPlan> readPlanFromString(String jsonString) throws IOException {
         if (jsonString == null) throw new IllegalArgumentException("jsonString is null");
         ObjectMapper om = new ObjectMapper();
         return om.readValue(jsonString, new TypeReference<List<DayPlan>>() {
         });
     }
 
-    public static Path convertFromJsonString(String jsonString, Path sourceNamePath, Path outputXlsx) throws Exception {
+    private Path doConvertFromJsonString(String jsonString, Path sourceNamePath, Path outputXlsx) throws Exception {
+        if (jsonString == null) throw new IllegalArgumentException("jsonString is null");
+        if (sourceNamePath == null) throw new IllegalArgumentException("sourceNamePath is null");
+        if (outputXlsx == null) throw new IllegalArgumentException("outputXlsx is null");
+        return render(jsonString, sourceNamePath, outputXlsx, inferYMFromSourceName(sourceNamePath));
+    }
+
+    private Path render(String jsonString, Path sourceNamePath, Path outputXlsx, YearMonth suppliedMonth) throws Exception {
         BORDER_STYLE_CACHE.clear();
 
         ZipSecureFile.setMinInflateRatio(0.0d);
@@ -1226,7 +1036,7 @@ public class JsonToExcelGeneral {
             throw new IllegalArgumentException("outputXlsx is null");
         }
 
-        YearMonth ym = inferYMFromSourceName(sourceNamePath);
+        YearMonth ym = suppliedMonth;
         String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
 
         String monthPrefix = extractMonthPrefixFromSourceName(sourceNamePath); // English comment: "26.1월"
@@ -1242,14 +1052,9 @@ public class JsonToExcelGeneral {
 
         if (outputXlsx.getParent() != null) Files.createDirectories(outputXlsx.getParent());
 
-        Workbook tplNew = null;
-        Workbook tplOld = null;
-
-
-        try (Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
-
-            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
-            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
+        try (Workbook out = WorkbookResources.open(tplFile);
+             Workbook tplNew = WorkbookResources.open(tplNewPath);
+             Workbook tplOld = WorkbookResources.open(tplOldPath)) {
 
 
             // English comment: Split normal days and birthday days
@@ -1350,7 +1155,7 @@ public class JsonToExcelGeneral {
         }
 
         return outputXlsx;
-    }
+        }
 
 
     static String normalizeForMatch(String s){
@@ -1364,9 +1169,9 @@ public class JsonToExcelGeneral {
         return t;
     }
 
-    static String normalizeMenu(String s) { return normalizeForMatch(s); }
+    String normalizeMenu(String s) { return normalizeForMatch(s); }
 
-    static CellRangeAddress findMergedRange(Sheet sh, int r, int c){
+    CellRangeAddress findMergedRange(Sheet sh, int r, int c){
         for (int i = 0; i < sh.getNumMergedRegions(); i++) {
             CellRangeAddress ra = sh.getMergedRegion(i);
             if (ra.isInRange(r, c)) return ra;
@@ -1374,13 +1179,13 @@ public class JsonToExcelGeneral {
         return null;
     }
 
-    static String readStringConsideringMerged(Sheet sh, int r, int c){
+    String readStringConsideringMerged(Sheet sh, int r, int c){
         Cell cell = getMergedAnchorCell(sh, r, c);
         if (cell == null) return "";
         return getString(cell).trim();
     }
 
-    static Cell getMergedAnchorCell(Sheet sh, int r, int c){
+    Cell getMergedAnchorCell(Sheet sh, int r, int c){
         for (int i=0;i<sh.getNumMergedRegions();i++){
             CellRangeAddress ra = sh.getMergedRegion(i);
             if (ra.isInRange(r,c)){
@@ -1394,7 +1199,7 @@ public class JsonToExcelGeneral {
         return row.getCell(c);
     }
 
-    static String getString(Cell cell){
+    String getString(Cell cell){
         if (cell==null) return "";
         switch (cell.getCellType()){
             case STRING: return cell.getStringCellValue();
@@ -1414,7 +1219,7 @@ public class JsonToExcelGeneral {
         }
     }
 
-    static boolean trySetNumeric(Cell c, String s) {
+    boolean trySetNumeric(Cell c, String s) {
         if (isBlank(s)) return false;
         try {
             String t = s.replace(",", "")
@@ -1438,7 +1243,7 @@ public class JsonToExcelGeneral {
         } catch (Exception e) { return false; }
     }
 
-    static Double parseNumericOrNull(String s) {
+    Double parseNumericOrNull(String s) {
         if (isBlank(s)) return null;
         try {
             String t = s.replace(",", "")
@@ -1457,11 +1262,11 @@ public class JsonToExcelGeneral {
         } catch (Exception e) { return null; }
     }
 
-    static boolean isIntegerDouble(double v){
+    boolean isIntegerDouble(double v){
         return Math.abs(v - Math.rint(v)) < 1e-9;
     }
 
-    static void setBorders(Cell cell, BorderStyle bs) {
+    void setBorders(Cell cell, BorderStyle bs) {
         if (cell == null) return;
 
         Workbook wb = cell.getSheet().getWorkbook();
@@ -1485,14 +1290,14 @@ public class JsonToExcelGeneral {
         cell.setCellStyle(cached);
     }
 
-    static void setMergedBorder(Sheet sh, CellRangeAddress rgn, BorderStyle bs) {
+    void setMergedBorder(Sheet sh, CellRangeAddress rgn, BorderStyle bs) {
         org.apache.poi.ss.util.RegionUtil.setBorderTop(bs, rgn, sh);
         org.apache.poi.ss.util.RegionUtil.setBorderBottom(bs, rgn, sh);
         org.apache.poi.ss.util.RegionUtil.setBorderLeft(bs, rgn, sh);
         org.apache.poi.ss.util.RegionUtil.setBorderRight(bs, rgn, sh);
     }
 
-    static Cell safeCell(Sheet sh, int r, int c) {
+    Cell safeCell(Sheet sh, int r, int c) {
         Row row = sh.getRow(r);
         if (row == null) row = sh.createRow(r);
         Cell cell = row.getCell(c);
@@ -1500,17 +1305,17 @@ public class JsonToExcelGeneral {
         return cell;
     }
 
-    static boolean isBlank(String s){ return s==null || s.trim().isEmpty(); }
-    static String nz(String s){ return s==null ? "" : s; }
+    boolean isBlank(String s){ return s==null || s.trim().isEmpty(); }
+    String nz(String s){ return s==null ? "" : s; }
 
-    static String compactSpaces(String s){
+    String compactSpaces(String s){
         if (s == null) return "";
         return s.replace('\u00A0',' ')
                 .replaceAll("[ \\t]{2,}", " ")
                 .trim();
     }
 
-    static void clearBordersInColumnA(Sheet sh, int fromRow, int toRow) {
+    void clearBordersInColumnA(Sheet sh, int fromRow, int toRow) {
         for (int r = fromRow; r <= toRow; r++) {
             Row row = sh.getRow(r);
             if (row == null) continue;
@@ -1528,7 +1333,7 @@ public class JsonToExcelGeneral {
         }
     }
 
-    static Sheet copyTopTemplateArea(
+    Sheet copyTopTemplateArea(
             Workbook out,
             int baseIdx,
             String newSheetName,
@@ -1567,7 +1372,7 @@ public class JsonToExcelGeneral {
     }
 
     // English comment: Remove merged regions that are below or crossing keepLastRow.
-    static void removeMergedRegionsBelowOrCrossing(Sheet sh, int keepLastRow) {
+    void removeMergedRegionsBelowOrCrossing(Sheet sh, int keepLastRow) {
         List<Integer> toRemove = new ArrayList<>();
         int i = 0;
         while (i < sh.getNumMergedRegions()) {
@@ -1585,7 +1390,7 @@ public class JsonToExcelGeneral {
     }
 
     // English comment: Remove pictures that start below keepLastRow (XSSF only).
-    static void removePicturesBelowRow(Sheet sh, int keepLastRow) {
+    void removePicturesBelowRow(Sheet sh, int keepLastRow) {
         if (!(sh instanceof org.apache.poi.xssf.usermodel.XSSFSheet)) return;
 
         org.apache.poi.xssf.usermodel.XSSFSheet xs = (org.apache.poi.xssf.usermodel.XSSFSheet) sh;
@@ -1625,7 +1430,7 @@ public class JsonToExcelGeneral {
         }
     }
 
-    static Path resolveAllergyImagePath() {
+    Path resolveAllergyImagePath() {
         Path appHome = getAppHomeDir();
         Path p1 = appHome.resolve("input").resolve("allergy.png");
         if (Files.exists(p1)) return p1;
@@ -1637,7 +1442,7 @@ public class JsonToExcelGeneral {
     }
 
     // English comment: Append allergy image under a day block, return next row index
-    static int appendAllergyImageUnderDay(Sheet sh, int rowIndex, int firstCol, int lastCol, TplKind kind) {
+    int appendAllergyImageUnderDay(Sheet sh, int rowIndex, int firstCol, int lastCol, TplKind kind) {
         try {
             Path imgPath = resolveAllergyImagePath();
             if (imgPath == null) return rowIndex;
@@ -1686,7 +1491,7 @@ public class JsonToExcelGeneral {
         }
     }
 
-    static void forceLeftOuterBorderDoubleAll(Sheet sh, int firstRow, int lastRow, int leftCol) {
+    void forceLeftOuterBorderDoubleAll(Sheet sh, int firstRow, int lastRow, int leftCol) {
 
         // English comment: 1) Force cell styles (for non-merged cells).
         int rr = firstRow;
@@ -1718,7 +1523,7 @@ public class JsonToExcelGeneral {
         }
     }
 
-    private static String extractMonthPrefixFromSourceName(Path sourceNamePath) {
+    private String extractMonthPrefixFromSourceName(Path sourceNamePath) {
         // English comment: Parse "2026년 1월 ..." from source file name.
         String name = sourceNamePath.getFileName().toString();
 
@@ -1746,7 +1551,7 @@ public class JsonToExcelGeneral {
         return yy + "." + month + "월";
     }
 
-    private static String buildSheetName(String monthPrefix, int weekIndex) {
+    private String buildSheetName(String monthPrefix, int weekIndex) {
         String wk;
         if (weekIndex == 1) wk = "첫째";
         else if (weekIndex == 2) wk = "둘째";
@@ -1771,7 +1576,7 @@ public class JsonToExcelGeneral {
     }
 
 
-    private static String buildBirthdaySheetName(String monthPrefix) {
+    private String buildBirthdaySheetName(String monthPrefix) {
         // English comment: Build "26.1월 ★birthday"
         String sheetName = monthPrefix.replace(".", ". ") + " ★birthday";
 
@@ -1789,7 +1594,7 @@ public class JsonToExcelGeneral {
         return sheetName;
     }
 
-    static YearMonth inferYMFromSourceName(Path sourceNamePath) {
+    YearMonth inferYMFromSourceName(Path sourceNamePath) {
         // English comment: Parse "2026년 1월 ..." from HWP file name.
         String name = sourceNamePath.getFileName().toString();
 
@@ -1815,7 +1620,7 @@ public class JsonToExcelGeneral {
         return inferYMFromJson(sourceNamePath);
     }
 
-    static YearMonth tryInferYMFromKoreanName(String filename) {
+    YearMonth tryInferYMFromKoreanName(String filename) {
         if (filename == null) return null;
 
         String name = filename;
@@ -1835,147 +1640,31 @@ public class JsonToExcelGeneral {
         return YearMonth.of(y, mo);
     }
 
-    static boolean isNoScaleMenu(String menuRaw) {
+    boolean isNoScaleMenu(String menuRaw) {
         if (menuRaw == null) return false;
         String n = normalizeForMatch(menuRaw);
         return NO_SCALE_MENUS_NORM.contains(n);
     }
 
     // New: Convert JSON -> EXCEL with explicit paths (for AllInOne)
-    public static Path convert(Path inputJson, Path outputXlsx) throws Exception {
-        ZipSecureFile.setMinInflateRatio(0.0d);
-        ZipSecureFile.setMaxFileCount(20000);
-
-        if (inputJson == null || !Files.exists(inputJson)) {
-            throw new IllegalArgumentException("JSON not found: " + inputJson);
-        }
-        if (outputXlsx == null) {
-            throw new IllegalArgumentException("outputXlsx is null");
-        }
-
-        YearMonth ym = inferYMFromSourceName(inputJson);
-        String titlePrefix = String.format("%d년 %d월", ym.getYear(), ym.getMonthValue());
-
-        String monthPrefix = extractMonthPrefixFromSourceName(inputJson); // English comment: "26.1월"
-
-        Path tplFile = resolveGeneralTemplate(inputJson);
-        Path tplNewPath = resolveGeneralTemplateNew(inputJson);
-        Path tplOldPath = resolveGeneralTemplateOld(inputJson);
-
-        TplKind tplKind = detectTplKind(tplFile);
-        TemplateCols T = colsOf(tplKind);
-
-        List<DayPlan> plan = readPlan(inputJson);
-
-        if (outputXlsx.getParent() != null) Files.createDirectories(outputXlsx.getParent());
-
-        Workbook tplNew = null;
-        Workbook tplOld = null;
-
-
-        try (Workbook out = WorkbookFactory.create(Files.newInputStream(tplFile))) {
-
-            if (tplNewPath != null) tplNew = WorkbookFactory.create(Files.newInputStream(tplNewPath));
-            if (tplOldPath != null) tplOld = WorkbookFactory.create(Files.newInputStream(tplOldPath));
-
-
-            // English comment: Split normal days and birthday days
-            List<DayPlan> normalDays = new ArrayList<>();
-            List<DayPlan> birthdayDays = new ArrayList<>();
-
-            for (DayPlan d : plan) {
-                if (d == null) continue;
-                String ds = nz(d.dateStr).trim();
-                if (ds.equalsIgnoreCase("birthday")) birthdayDays.add(d);
-                else normalDays.add(d);
-            }
-
-            int weekIndex = 1;
-
-            String baseName = out.getSheetName(0);
-
-            // Keep only base sheet in template workbook
-            for (int i = out.getNumberOfSheets() - 1; i >= 0; i--) {
-                String nm = out.getSheetName(i);
-                if (!baseName.equals(nm)) out.removeSheetAt(i);
-            }
-
-            // Re-find baseIdx (it will be 0 after pruning)
-            int baseIdx = out.getSheetIndex(baseName);
-            out.setSheetName(baseIdx, "__BASE_TEMPLATE__");
-            Styles S = Styles.build(out);
-
-            int DATA_START_ROW;
-            if (tplKind == TplKind.P12) DATA_START_ROW = 5;  // 1-2세: title at Excel row 6
-            else DATA_START_ROW = 6;                           // 3-5세: title at Excel row 7
-
-            int keepLastRow = DATA_START_ROW - 1;
-
-            Sheet sh = copyTopTemplateArea(
-                    out,
-                    baseIdx,
-                    buildSheetName(monthPrefix, weekIndex),
-                    keepLastRow
-            );
-
-            int currentRow = DATA_START_ROW;
-
-
-            for (int i = 0; i < normalDays.size(); i++) {
-                DayPlan d = normalDays.get(i);
-                if (d == null) continue;
-                if (d.date == null) continue;
-
-                int beforeRow = currentRow;
-
-                currentRow = writeOneDay(sh, S, d, tplNew, tplOld, T, tplKind, titlePrefix, currentRow, false);
-
-                if (currentRow > beforeRow) {
-                    currentRow = currentRow + 1;
-                }
-
-                if (isWeekEndGeneral(d.weekday)) {
-                    if (i < normalDays.size() - 1) {
-                        weekIndex = weekIndex + 1;
-                        sh = copyTopTemplateArea(
-                                out,
-                                baseIdx,
-                                buildSheetName(monthPrefix, weekIndex),
-                                keepLastRow
-                        );
-
-                        currentRow = DATA_START_ROW;
-                    }
-                }
-            }
-
-            // English comment: Birthday dedicated sheet
-            if (!birthdayDays.isEmpty()) {
-                keepLastRow = DATA_START_ROW - 1;
-
-                Sheet bdaySheet = copyTopTemplateArea(
-                        out,
-                        baseIdx,
-                        buildBirthdaySheetName(monthPrefix),
-                        keepLastRow
-                );
-
-                int r = DATA_START_ROW;
-
-                for (DayPlan d : birthdayDays) {
-                    r = writeOneDay(bdaySheet, S, d, tplNew, tplOld, T, tplKind, titlePrefix, r, true);
-                    r = r + 4; // Birthday는 하루 블록 간격을 넉넉히
-                }
-            }
-
-            int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
-            if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
-
-            try (OutputStream os = Files.newOutputStream(outputXlsx)) {
-                out.write(os);
-            }
-        }
-
-        return outputXlsx;
+    private Path doConvert(Path inputJson, Path outputXlsx) throws Exception {
+        return render(Files.readString(inputJson, java.nio.charset.StandardCharsets.UTF_8), inputJson, outputXlsx, inferYMFromJson(inputJson));
     }
+
+    public static Path convertFromJsonString(String json, Path source, Path output, Path appHome) throws Exception {
+        return new JsonToExcelGeneral(appHome).doConvertFromJsonString(json, source, output);
+    }
+
+    public static void main(String[] args) throws Exception {
+        new JsonToExcelGeneral().runMain(args);
+    }
+
+    public static Path convertFromJsonString(String jsonString, Path sourceNamePath, Path outputXlsx) throws Exception {
+        return new JsonToExcelGeneral().doConvertFromJsonString(jsonString, sourceNamePath, outputXlsx);
+    }
+
+    public static Path convert(Path inputJson, Path outputXlsx) throws Exception {
+        return new JsonToExcelGeneral().doConvert(inputJson, outputXlsx);
+    }
+
 }

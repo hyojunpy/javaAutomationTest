@@ -195,26 +195,9 @@ public class AllInOneUI extends JFrame {
                 return;
             }
 
-            // English comment: Many existing codes use "app.home" system property to resolve input resources.
-            System.setProperty("app.home", appHome.toString());
-
-            // English comment: Decide mode by filename (simple 1st rule only).
-            boolean isExtended = hwp.getName().contains("시간연장");
-
-            log("HWP 분석 시작...");
             log("INPUT  : " + hwp.getAbsolutePath());
             log("OUTPUT : " + outXlsx.getAbsolutePath());
-            log("MODE   : " + (isExtended ? "EXTENDED" : "GENERAL"));
-
-            String json;
-
-            if (isExtended) {
-                json = HwpToJson.convertToJsonString(hwp);
-                JsonToExcel.convertFromJsonString(json, hwp.toPath(), outXlsx.toPath());
-            } else {
-                json = HwpToJsonGeneral.convertToJsonString(hwp);
-                JsonToExcelGeneral.convertFromJsonString(json, hwp.toPath(), outXlsx.toPath());
-            }
+            new ConversionEngine(appHome).convert(hwp.toPath(), outXlsx.toPath(), this::log);
 
             log("변환 완료");
 

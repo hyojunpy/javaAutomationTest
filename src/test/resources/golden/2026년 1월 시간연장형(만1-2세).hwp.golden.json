@@ -1,0 +1,143 @@
+{
+  "plan" : [ {
+    "date" : 1,
+    "weekday" : "목",
+    "menus" : [ "없음" ]
+  }, {
+    "date" : 2,
+    "weekday" : "금",
+    "menus" : [ "기장밥", "배추김치⑨", "애호박된장국⑤⑥", "떡갈비조림②⑤⑥⑩⑫⑯", "숙주나물무침" ]
+  }, {
+    "date" : 5,
+    "weekday" : "월",
+    "menus" : [ "훈제오리채소볶음밥①②⑤⑥⑫⑯", "감자국⑤⑥", "버섯나물⑤", "배추김치⑨" ]
+  }, {
+    "date" : 6,
+    "weekday" : "화",
+    "menus" : [ "기장밥", "깍두기⑨", "시금치된장국⑤⑥", "돈육굴소스볶음⑤⑥⑨⑩⑱", "콩나물무침⑤" ]
+  }, {
+    "date" : 7,
+    "weekday" : "수",
+    "menus" : [ "흑미밥", "배추김치⑨", "팽이버섯국⑤⑥", "쇠불고기⑤⑥⑯", "오이나물" ]
+  }, {
+    "date" : 8,
+    "weekday" : "목",
+    "menus" : [ "닭살채소볶음밥⑤⑥⑨⑮⑱", "가쓰오장국⑤⑥⑦⑨⑯⑱", "양배추샐러드①⑤⑫⑯", "깍두기⑨" ]
+  }, {
+    "date" : 9,
+    "weekday" : "금",
+    "menus" : [ "수수밥", "배추김치⑨", "들깨무채국⑤⑥", "고등어구이⑤⑦", "브로콜리두부무침⑤" ]
+  }, {
+    "date" : 12,
+    "weekday" : "월",
+    "menus" : [ "수수밥", "배추김치⑨", "애호박된장국⑤⑥", "돈육양파볶음⑤⑥⑩", "무른우엉채조림⑤⑥" ]
+  }, {
+    "date" : 13,
+    "weekday" : "화",
+    "menus" : [ "차조밥", "배추김치⑨", "순두부찌개⑤⑥", "닭살브로콜리볶음⑤⑥⑮", "김구이" ]
+  }, {
+    "date" : 14,
+    "weekday" : "수",
+    "menus" : [ "기장밥", "깍두기⑨", "황태국⑤⑥", "쇠고기피망조림⑤⑥⑯", "시금치나물⑤⑥" ]
+  }, {
+    "date" : 15,
+    "weekday" : "목",
+    "menus" : [ "흑미밥", "깍두기⑨", "안매운육개장⑤⑥⑯", "채소달걀말이①⑤", "배추된장나물⑤⑥" ]
+  }, {
+    "date" : 16,
+    "weekday" : "금",
+    "menus" : [ "쌀밥", "깍두기⑨", "봄동두부국⑤⑥", "탕수육①②⑤⑥⑩⑫⑮⑯", "숙주나물무침" ]
+  }, {
+    "date" : 19,
+    "weekday" : "월",
+    "menus" : [ "기장밥", "배추김치⑨", "미역국⑤⑥", "쇠고기당근케첩조림⑤⑥⑫⑯", "청경채나물⑤⑥" ]
+  }, {
+    "date" : 20,
+    "weekday" : "화",
+    "menus" : [ "수수밥", "배추김치⑨", "들깨버섯국⑤⑥", "제육볶음⑤⑥⑩", "애호박나물⑤" ]
+  }, {
+    "date" : 21,
+    "weekday" : "수",
+    "menus" : [ "차조밥", "깍두기⑨", "새우살부추국⑤⑥⑨", "달걀장조림①⑤⑥", "양배추볶음⑤⑥" ]
+  }, {
+    "date" : 22,
+    "weekday" : "목",
+    "menus" : [ "흑미밥", "배추김치⑨", "감자된장국⑤⑥", "두부구이⑤&양념장⑤⑥", "무나물" ]
+  }, {
+    "date" : 23,
+    "weekday" : "금",
+    "menus" : [ "닭살마요덮밥①②⑤⑥⑩⑫⑮⑯", "콩나물국⑤", "무른잔멸치조림⑤⑥", "깍두기⑨" ]
+  }, {
+    "date" : 26,
+    "weekday" : "월",
+    "menus" : [ "차조밥", "깍두기⑨", "달걀파국①", "쇠고기청경채볶음⑤⑥⑯", "봄동된장무침⑤⑥" ]
+  }, {
+    "date" : 27,
+    "weekday" : "화",
+    "menus" : [ "흑미밥", "배추김치⑨", "맑은두부국⑤⑥", "삼치무조림⑤⑥", "버섯나물" ]
+  }, {
+    "date" : 28,
+    "weekday" : "수",
+    "menus" : [ "돈육브로콜리볶음밥⑤⑥⑨⑩⑱", "채소당면국⑤⑥", "스크램블에그①⑤", "깍두기⑨" ]
+  }, {
+    "date" : 29,
+    "weekday" : "목",
+    "menus" : [ "수수밥", "배추김치⑨", "닭곰탕⑮", "볼어묵조림①②⑤⑥⑧⑨⑱", "감자채볶음⑤" ]
+  }, {
+    "date" : 30,
+    "weekday" : "금",
+    "menus" : [ "쌀밥", "깍두기⑨", "무된장국⑤⑥", "돈육완자전①②⑤⑥⑩⑮⑯⑱", "오이나물" ]
+  } ],
+  "workbookParts" : {
+    "xl/_rels/workbook.xml.rels" : "1ca0e4242832321405a6c5a5e17443804372f933e230df45a572b096fe383454",
+    "xl/drawings/_rels/drawing2.xml.rels" : "b71fc106e07e85b99cf09ba61731fb741fd20b621b3c14baf94f6430a415c510",
+    "xl/drawings/_rels/drawing3.xml.rels" : "7439896f5ab711c5f957e127e5c1869ee5dc11c3fd4d73b8e0fd7751b8539d55",
+    "xl/drawings/_rels/drawing4.xml.rels" : "f91fa0a4a7850703a4de418223ef1d34b4222a1a86a55b0a85330ff455375cf0",
+    "xl/drawings/_rels/drawing5.xml.rels" : "7ddb950ad21bbf16dddbc377bf66cde5b375be2db0db4b65b47c43bac004e2d8",
+    "xl/drawings/_rels/drawing6.xml.rels" : "b23002e628dca61b79795d1a366f06d36ec15cba12b3e15d226e575340c918e1",
+    "xl/drawings/drawing2.xml" : "1d4fbcc2b11c51341d558d8a7b2c3dd87c3af49d08c32c96cd16eb72c1941d0d",
+    "xl/drawings/drawing3.xml" : "e1e5cd39e5f8f856619ebdfe58d4ec0f76dea36799826c5b65ca1591df431b41",
+    "xl/drawings/drawing4.xml" : "058eba0818d6cd3854d02cbdfe5ea311b26f20e7ed8ebaca6a5904d522206f26",
+    "xl/drawings/drawing5.xml" : "a5275c713cab69c9a0eed28b64357e952635b66ed191953765714ad2da61d75d",
+    "xl/drawings/drawing6.xml" : "a2b00138d6e8af8caa9f9acae3c60e037a174075414f8d0b463b662d5165f5c9",
+    "xl/media/image1.jpeg" : "0ef1675475fe37375215e281bea6dbad552ee378b91047e201a4907d4b292d57",
+    "xl/media/image10.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image11.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image12.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image13.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image14.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image15.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image16.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image17.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image18.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image19.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image2.jpg" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image20.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image21.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image22.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image23.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image24.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image25.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image3.png" : "de1ba1962301645535a45af8a8fab3640884e01e052dbdac817940c88ce35706",
+    "xl/media/image4.jpeg" : "52c2a9192b471cf9127c388b130be94723abb06c73bee921b036d28e52c8b61c",
+    "xl/media/image5.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image6.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image7.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image8.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/media/image9.png" : "9095b052759b91a8238f022dc3c6cb292f52f7d76c9f702299c7518421a3c436",
+    "xl/sharedStrings.xml" : "2205b0d24f6055241b90d5f8c91dd6c9bf25d4fd6a5d9cc4d9aeb55965bf1f27",
+    "xl/styles.xml" : "0c6c15014961fbeaaf411d337761702c46d422a83528139e757009f4864f9a31",
+    "xl/theme/theme1.xml" : "f22cc6383458df31dbc6f939ed5917bfe7477d5ba3f17cdc15bd6a53d060a790",
+    "xl/workbook.xml" : "3278290a7232db7ea49d97458bb3bedd591240a0ce115244f30e17c0e618f092",
+    "xl/worksheets/_rels/sheet2.xml.rels" : "6fe185720ce165f62d3dec5b400c03925e980e91d803fe80be041b5a3e859eaf",
+    "xl/worksheets/_rels/sheet3.xml.rels" : "f75062fe895c765b5e0e3ca485c31dcabed31dd79c24dd78041bcedb56fb1bd4",
+    "xl/worksheets/_rels/sheet4.xml.rels" : "4a661dcc156b8564b14c3d9329d7359e88dbe776f9c50c4da0579924225a8602",
+    "xl/worksheets/_rels/sheet5.xml.rels" : "a0fb56caf16a0d481ac66b103841058e9a97ad14ac2af8d37fee90ae13f7cdf5",
+    "xl/worksheets/_rels/sheet6.xml.rels" : "b67a9be67af9e12bbfd0f41657dc4a6747efcc7438545ee682670e4224cda16e",
+    "xl/worksheets/sheet2.xml" : "157fbbe21297b1b8eb7b4af9fac3c6ac66af786fd80c0f38d85482afa5e4ae12",
+    "xl/worksheets/sheet3.xml" : "094e1b4c1d225d93f0afb923baeeab68732752bc2422faade45cef22d6033be1",
+    "xl/worksheets/sheet4.xml" : "f4a00ba86c8779af5f957760e87a576428f088042b365590e702370ccccaf18c",
+    "xl/worksheets/sheet5.xml" : "225dc29db4ca5e7f60699f270e7fc4050e7fe6caf1c59374e46dc9610d9a7aa3",
+    "xl/worksheets/sheet6.xml" : "72656ec5b869feadb03fdedde8e09bd2f9d5cf0f4ea4ca55265973d2f45340fa"
+  }
+}
