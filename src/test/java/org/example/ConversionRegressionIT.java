@@ -14,8 +14,10 @@ class ConversionRegressionIT {
     @TempDir Path output;
 
     static Stream<Path> sources() throws Exception {
+        String filter = System.getProperty("conversion.regression.inputFilter", "");
         try (var files = Files.list(Path.of("input"))) {
-            return files.filter(p -> p.toString().endsWith(".hwp")).sorted().toList().stream();
+            return files.filter(p -> p.toString().endsWith(".hwp"))
+                    .filter(p -> p.getFileName().toString().contains(filter)).sorted().toList().stream();
         }
     }
 

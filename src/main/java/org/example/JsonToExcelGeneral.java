@@ -1161,7 +1161,7 @@ public class JsonToExcelGeneral {
 
     static String normalizeForMatch(String s){
         if (s == null) return "";
-        String t = s;
+        String t = MenuNamePrefix.withoutStep(s);
         t = t.replaceAll("[\u2460-\u2472]", "");
         t = t.replace("쇠고기", "소고기").replace("닭 살", "닭살").replace("계란", "달걀");
         t = t.replaceAll("\\s+","")

@@ -768,7 +768,7 @@ public class JsonToExcel {
 
     String normalizeForMatch(String s) {
         if (s == null) return "";
-        String t = applyAlias(s);
+        String t = applyAlias(MenuNamePrefix.withoutStep(s));
         t = t.replaceAll("[\u2460-\u2473①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]", "");
         t = t.replaceAll("[()\\[\\]{}／/·ㆍ・＆&\\-★☆※•….,;:]", "");
         t = t.replaceAll("\\s+", "");
