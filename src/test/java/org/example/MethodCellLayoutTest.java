@@ -61,4 +61,20 @@ class MethodCellLayoutTest {
             assertEquals(18, book.getSheetAt(0).getRow(0).getHeightInPoints());
         }
     }
+    @Test void oneLineKeepsOriginalHeightEvenWithLargerFont() throws Exception {
+        try (var book = new XSSFWorkbook()) {
+            var area = prepare(book, "① 깨끗이 씻어 제공한다.", 1, 12);
+            var sheet = book.getSheetAt(0);
+            book.getFontAt(sheet.getRow(0).getCell(0).getCellStyle().getFontIndex()).setFontHeightInPoints((short)11);
+            MethodCellLayout.fit(sheet, area);
+            assertEquals(18, sheet.getRow(0).getHeightInPoints());
+        }
+    }
+    @Test void fittingLineDoesNotUseConservativeWrappingMargin() throws Exception {
+        try (var book = new XSSFWorkbook()) {
+            var area = prepare(book, "① 먹기 좋은 크기로 썰어 제공한다.", 1, 6);
+            MethodCellLayout.fit(book.getSheetAt(0), area);
+            assertEquals(18, book.getSheetAt(0).getRow(0).getHeightInPoints());
+        }
+    }
 }

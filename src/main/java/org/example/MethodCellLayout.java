@@ -5,6 +5,7 @@ import org.apache.poi.ss.util.CellRangeAddress;
 import java.awt.font.FontRenderContext;
 import java.awt.font.LineBreakMeasurer;
 import java.awt.font.TextAttribute;
+import java.awt.font.TextLayout;
 import java.text.AttributedString;
 
 /** Excel does not automatically fit the height of merged, wrapped cells. */
@@ -23,6 +24,11 @@ final class MethodCellLayout {
         java.awt.Font measuredFont = new java.awt.Font(font.getFontName(), style, 1).deriveFont(points * 96f / 72f);
         float width = 0;
         for (int col = area.getFirstColumn(); col <= area.getLastColumn(); col++) width += sheet.getColumnWidthInPixels(col);
+        String method = cell.getStringCellValue();
+        // Keep the original height when one unbroken paragraph fits the actual cell width.
+        // The conservative wrapping allowance below must not turn a fitting line into two.
+        if (method.indexOf('\n') < 0 && method.indexOf('\r') < 0
+                && new TextLayout(method, measuredFont, METRICS).getAdvance() <= Math.max(1, width - 10)) return;
         // Allow for cell padding and differences between Java and Excel font rendering.
         width = Math.max(1, (width - 10) / 1.12f);
         int lines = 0;
@@ -33,6 +39,7 @@ final class MethodCellLayout {
             LineBreakMeasurer measurer = new LineBreakMeasurer(text.getIterator(), METRICS);
             while (measurer.getPosition() < paragraph.length()) { measurer.nextLayout(width); lines++; }
         }
+        if (lines <= 1) return;
         float required = lines * points * 1.4f + 4;
         float existing = 0;
         for (int r = area.getFirstRow(); r <= area.getLastRow(); r++) existing += sheet.getRow(r).getHeightInPoints();
