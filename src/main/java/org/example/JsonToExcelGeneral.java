@@ -682,6 +682,7 @@ public class JsonToExcelGeneral {
                 c.setCellStyle(S.methodMerged);
             }
         }
+        MethodCellLayout.fit(sh, new CellRangeAddress(partStart, partEnd, methodFirst, methodLast));
         return r;
     }
 

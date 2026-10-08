@@ -14,3 +14,10 @@ ZIP 타임스탬프와 docProps 메타데이터는 비교하지 않습니다.
 이 두 plan의 workbookParts는 수정된 plan을 기존 JAR의 렌더러로 변환하여 다시 추출했습니다.
 나머지 6개 기준은 변경하지 않았습니다. 최신 템플릿의 3개 재료 및 분량·수식은
 HamburgRecipeTest에서 별도로 검증합니다.
+
+만드는 방법 높이 수정: 위 기준 XLSX 8개에 MethodCellLayout을 별도로 적용했습니다.
+기존 파트 해시가 현재 기준과 일치하는지 먼저 확인했고, 적용 후에는 모든 xl/ 파트의
+XML과 바이너리를 비교해 행 높이(ht/customHeight) 외의 차이가 없음을 확인했습니다.
+검토한 결과의 workbookParts를 반영했으며 plan, 값, 수식, 병합, 스타일, 이미지 및
+인쇄 설정은 유지합니다. MethodCellLayoutTest는 줄바꿈, 폭에 따른 줄 나눔,
+여러 재료 행의 기존 높이 유지 및 저장 후 높이를 별도로 검증합니다.
