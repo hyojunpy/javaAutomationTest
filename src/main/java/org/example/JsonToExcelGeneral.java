@@ -277,8 +277,7 @@ public class JsonToExcelGeneral {
             bodyCenter.setVerticalAlignment(VerticalAlignment.CENTER);
             bodyCenter.setWrapText(true);
             bodyCenter.setFont(bodyFont);
-            bodyCenter.setFillForegroundColor(IndexedColors.WHITE.getIndex());
-            bodyCenter.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            bodyCenter.setFillPattern(FillPatternType.NO_FILL);
 
             CellStyle methodMerged = wb.createCellStyle();
             methodMerged.cloneStyleFrom(base);
@@ -286,8 +285,7 @@ public class JsonToExcelGeneral {
             methodMerged.setVerticalAlignment(VerticalAlignment.CENTER);
             methodMerged.setWrapText(true);
             methodMerged.setFont(bodyFont);
-            methodMerged.setFillForegroundColor(IndexedColors.WHITE.getIndex());
-            methodMerged.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            methodMerged.setFillPattern(FillPatternType.NO_FILL);
 
             CellStyle num1 = wb.createCellStyle();
             num1.cloneStyleFrom(bodyCenter);
@@ -1173,6 +1171,7 @@ public class JsonToExcelGeneral {
             int baseIdx2 = out.getSheetIndex("__BASE_TEMPLATE__");
             if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
+            ColumnAStyle.apply(out, S.bodyCenter);
             try (OutputStream os = Files.newOutputStream(outputXlsx)) {
                 out.write(os);
             }
