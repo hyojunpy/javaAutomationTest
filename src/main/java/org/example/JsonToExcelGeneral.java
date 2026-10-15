@@ -1172,6 +1172,7 @@ public class JsonToExcelGeneral {
             if (baseIdx2 >= 0) out.removeSheetAt(baseIdx2);
 
             ColumnAStyle.apply(out, S.bodyCenter);
+            WorkbookFillCleanup.apply(out);
             try (OutputStream os = Files.newOutputStream(outputXlsx)) {
                 out.write(os);
             }

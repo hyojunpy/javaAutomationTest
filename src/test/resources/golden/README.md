@@ -63,3 +63,13 @@ step 접두사 매칭 수정: 일반형 네 예시에서 1월 6일과 2월 2일�
 동일하게 적용하며, 기존 빈 여백의 테두리 없음과 열 너비를 유지합니다.
 이전 흰색 채우기 기준과 비교해 본문 채우기 및 A열 스타일 외의
 데이터·수식·병합·행 높이·이미지가 동일한지 검토해 기준을 갱신했습니다.
+
+편집 시 검은 배경 재발 보완: POI CellUtil/RegionUtil이 NO_FILL 스타일에
+fgColor/bgColor 자동 색상 정보를 삽입하는 bug-69463 패턴을 실제 결과에서
+확인했습니다. 모든 테두리 후처리와 A열 설정이 끝난 저장 직전에,
+채우기 없는 fill에서만 fgColor/bgColor를 제거하고 patternType=none을 명시합니다.
+실제 색상 채우기와 다른 서식은 유지합니다. 두 렌더러의 테두리 처리로
+문제 패턴을 재현하고 저장·재열기 후 제거되는 테스트를 추가했습니다.
+이전 기준과 비교해 숨은 no-fill 색상 정보 정리 외의 모든 xl/ 파트가
+동일한지 검토해 기준을 갱신했습니다.
+참고: https://github.com/apache/poi/blob/trunk/src/documentation/content/xdocs/changes.xml (69463)
