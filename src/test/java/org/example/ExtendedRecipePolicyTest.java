@@ -39,7 +39,7 @@ class ExtendedRecipePolicyTest {
         Path template = input.resolve(TemplateCatalog.filename(true, age12, true));
         try (var book = new XSSFWorkbook(); var stream = Files.newOutputStream(template)) {
             var old = book.createSheet("26. 2월 넷째주");
-            var oldRow = old.createRow(8); oldRow.createCell(1).setCellValue("숙주나물무침⑤⑥");
+            var oldRow = old.createRow(8); oldRow.createCell(1).setCellValue("숙주나물무침⑦");
             oldRow.createCell(2).setCellValue("간장"); oldRow.createCell(4).setCellValue(1);
             var sheet = book.createSheet("26. 9월 다섯째주");
             for (int r=0;r<7;r++) sheet.createRow(r);

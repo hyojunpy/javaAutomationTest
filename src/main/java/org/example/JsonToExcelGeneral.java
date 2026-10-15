@@ -40,7 +40,8 @@ import java.util.regex.Pattern;
 public class JsonToExcelGeneral {
     private final Path appHome;
     private record RecipeAnchor(Sheet sheet, int row) {}
-    private final Map<Workbook, Map<Integer, Map<String, RecipeAnchor>>> recipeIndexes = new IdentityHashMap<>();
+    private record RecipeIndex(Map<String, RecipeAnchor> withAllergens, Map<String, RecipeAnchor> normalized) {}
+    private final Map<Workbook, Map<Integer, RecipeIndex>> recipeIndexes = new IdentityHashMap<>();
     private final Map<Sheet, TemplateMergedCells> templateMergedCells = new IdentityHashMap<>();
 
     private JsonToExcelGeneral() { this(TemplateCatalog.defaultHome()); }
@@ -856,15 +857,21 @@ public class JsonToExcelGeneral {
 
     /* ===== Template search: exact only ===== */
     Optional<Block> findBlockInTemplateExact(Workbook wb, String menuRaw, TemplateCols T){
-        String keyNorm = normalizeForMatch(menuRaw);
-        Map<String, RecipeAnchor> index = recipeIndexes.computeIfAbsent(wb, ignored -> new HashMap<>())
+        Optional<Block> exact = findBlockInPhase(wb, menuRaw, T, true);
+        return exact.isPresent() ? exact : findBlockInPhase(wb, menuRaw, T, false);
+    }
+
+    private Optional<Block> findBlockInPhase(Workbook wb, String menuRaw, TemplateCols T, boolean withAllergens) {
+        String key = withAllergens ? MenuMatchKey.withAllergens(menuRaw) : normalizeForMatch(menuRaw);
+        if (key.isEmpty()) return Optional.empty();
+        RecipeIndex index = recipeIndexes.computeIfAbsent(wb, ignored -> new HashMap<>())
                 .computeIfAbsent(T.colMenu, ignored -> buildRecipeIndex(wb, T.colMenu));
-        RecipeAnchor anchor = index.get(keyNorm);
+        RecipeAnchor anchor = (withAllergens ? index.withAllergens() : index.normalized()).get(key);
         return anchor == null ? Optional.empty() : Optional.of(buildBlockFromAnchor(anchor.sheet(), anchor.row(), T));
     }
 
-    private Map<String, RecipeAnchor> buildRecipeIndex(Workbook wb, int menuColumn) {
-        Map<String, RecipeAnchor> index = new HashMap<>();
+    private RecipeIndex buildRecipeIndex(Workbook wb, int menuColumn) {
+        Map<String, RecipeAnchor> exact = new HashMap<>(), normalized = new HashMap<>();
         for (int s = wb.getNumberOfSheets() - 1; s >= 0; s--) {
             Sheet sh = wb.getSheetAt(s);
             templateMergedCells.computeIfAbsent(sh, TemplateMergedCells::new);
@@ -872,11 +879,14 @@ public class JsonToExcelGeneral {
             for (int r = 0; r <= lastRow; r++) {
                 String cellMenu = readStringConsideringMerged(sh, r, menuColumn);
                 if (isBlank(cellMenu)) continue;
+                RecipeAnchor anchor = new RecipeAnchor(sh, r);
+                String cellExact = MenuMatchKey.withAllergens(cellMenu);
+                if (!cellExact.isEmpty()) exact.putIfAbsent(cellExact, anchor);
                 String cellNorm = normalizeForMatch(cellMenu);
-                if (!cellNorm.isEmpty()) index.putIfAbsent(cellNorm, new RecipeAnchor(sh, r));
+                if (!cellNorm.isEmpty()) normalized.putIfAbsent(cellNorm, anchor);
             }
         }
-        return index;
+        return new RecipeIndex(exact, normalized);
     }
 
     Optional<Block> findBlockInTemplateExactPreferNew(
@@ -885,14 +895,15 @@ public class JsonToExcelGeneral {
             String menuRaw,
             TemplateCols T
     ) {
-        // English comment: Try 2026 template first, then fallback to 2022~2025
-        if (tplNew != null) {
-            Optional<Block> a = findBlockInTemplateExact(tplNew, menuRaw, T);
-            if (a.isPresent()) return a;
-        }
-        if (tplOld != null) {
-            Optional<Block> b = findBlockInTemplateExact(tplOld, menuRaw, T);
-            if (b.isPresent()) return b;
+        for (boolean withAllergens : new boolean[]{true, false}) {
+            if (tplNew != null) {
+                Optional<Block> a = findBlockInPhase(tplNew, menuRaw, T, withAllergens);
+                if (a.isPresent()) return a;
+            }
+            if (tplOld != null) {
+                Optional<Block> b = findBlockInPhase(tplOld, menuRaw, T, withAllergens);
+                if (b.isPresent()) return b;
+            }
         }
         return Optional.empty();
     }

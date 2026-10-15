@@ -33,6 +33,10 @@ import java.util.regex.Pattern;
  */
 public class JsonToExcel {
     private final Path appHome;
+    private record RecipeAnchor(Sheet sheet, int first, int last) {}
+    private record RecipeIndex(Map<String, RecipeAnchor> withAllergens, Map<String, RecipeAnchor> normalized) {}
+    private final Map<Workbook, RecipeIndex> recipeIndexes = new IdentityHashMap<>();
+    private final Map<Sheet, TemplateMergedCells> templateMergedCells = new IdentityHashMap<>();
 
     private JsonToExcel() { this(TemplateCatalog.defaultHome()); }
 
@@ -526,11 +530,24 @@ public class JsonToExcel {
     }
 
     SearchResult findBlockInTemplateExactOnly(Workbook wb, String menuRaw) {
-        String keyExact = compactSpacesPreserveAll(applyAlias(menuRaw));
-        String keyNorm = normalizeForMatch(keyExact);
+        SearchResult exact = findBlockInPhase(wb, menuRaw, true);
+        return exact.found ? exact : findBlockInPhase(wb, menuRaw, false);
+    }
 
+    private SearchResult findBlockInPhase(Workbook wb, String menuRaw, boolean withAllergens) {
+        String key = withAllergens ? MenuMatchKey.withAllergens(menuRaw) : normalizeForMatch(menuRaw);
+        if (key.isEmpty()) return SearchResult.miss();
+        RecipeIndex index = recipeIndexes.computeIfAbsent(wb, this::buildRecipeIndex);
+        RecipeAnchor anchor = (withAllergens ? index.withAllergens() : index.normalized()).get(key);
+        return anchor == null ? SearchResult.miss()
+                : new SearchResult(true, withAllergens, readBlock(anchor.sheet(), anchor.first(), anchor.last()));
+    }
+
+    private RecipeIndex buildRecipeIndex(Workbook wb) {
+        Map<String, RecipeAnchor> exact = new HashMap<>(), normalized = new HashMap<>();
         for (int s = wb.getNumberOfSheets() - 1; s >= 0; s--) {
             Sheet sh = wb.getSheetAt(s);
+            templateMergedCells.computeIfAbsent(sh, TemplateMergedCells::new);
             int lastRow = sh.getLastRowNum();
 
             int r = 0;
@@ -557,16 +574,16 @@ public class JsonToExcel {
                     last = rr - 1;
                 }
 
-                String cellExact = compactSpacesPreserveAll(cellMenu);
-                String cellNorm = normalizeForMatch(cellExact);
-
-                if (cellExact.equals(keyExact)) return new SearchResult(true, true, readBlock(sh, first, last));
-                if (cellNorm.equals(keyNorm)) return new SearchResult(true, false, readBlock(sh, first, last));
+                String cellExact = MenuMatchKey.withAllergens(cellMenu);
+                String cellNorm = normalizeForMatch(cellMenu);
+                RecipeAnchor anchor = new RecipeAnchor(sh, first, last);
+                if (!cellExact.isEmpty()) exact.putIfAbsent(cellExact, anchor);
+                if (!cellNorm.isEmpty()) normalized.putIfAbsent(cellNorm, anchor);
 
                 r = last + 1;
             }
         }
-        return SearchResult.miss();
+        return new RecipeIndex(exact, normalized);
     }
 
     Block readBlock(Sheet sh, int first, int last) {
@@ -615,6 +632,8 @@ public class JsonToExcel {
     }
 
     CellRangeAddress findMergedRange(Sheet sh, int r, int c) {
+        TemplateMergedCells snapshot = templateMergedCells.get(sh);
+        if (snapshot != null) return snapshot.find(r, c);
         for (int i = 0; i < sh.getNumMergedRegions(); i++) {
             CellRangeAddress ra = sh.getMergedRegion(i);
             if (ra.isInRange(r, c)) return ra;
@@ -629,6 +648,12 @@ public class JsonToExcel {
     }
 
     Cell getMergedAnchorCell(Sheet sh, int r, int c) {
+        TemplateMergedCells snapshot = templateMergedCells.get(sh);
+        if (snapshot != null) {
+            CellRangeAddress range = snapshot.find(r, c);
+            Row row = sh.getRow(range == null ? r : range.getFirstRow());
+            return row == null ? null : row.getCell(range == null ? c : range.getFirstColumn());
+        }
         for (int i = 0; i < sh.getNumMergedRegions(); i++) {
             CellRangeAddress ra = sh.getMergedRegion(i);
             if (ra.isInRange(r, c)) {
@@ -1119,13 +1144,15 @@ public class JsonToExcel {
     }
 
     SearchResult findBlockInTemplateExactPreferNew(Workbook tplNew, Workbook tplOld, String rawMenu) {
-        if (tplNew != null) {
-            SearchResult a = findBlockInTemplateExactOnly(tplNew, rawMenu);
-            if (a.found) return a;
-        }
-        if (tplOld != null) {
-            SearchResult b = findBlockInTemplateExactOnly(tplOld, rawMenu);
-            if (b.found) return b;
+        for (boolean withAllergens : new boolean[]{true, false}) {
+            if (tplNew != null) {
+                SearchResult a = findBlockInPhase(tplNew, rawMenu, withAllergens);
+                if (a.found) return a;
+            }
+            if (tplOld != null) {
+                SearchResult b = findBlockInPhase(tplOld, rawMenu, withAllergens);
+                if (b.found) return b;
+            }
         }
         return SearchResult.miss();
     }
