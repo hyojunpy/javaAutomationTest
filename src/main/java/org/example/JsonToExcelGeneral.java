@@ -209,6 +209,7 @@ public class JsonToExcelGeneral {
             Font bodyFont = wb.createFont();
             bodyFont.setFontName("한컴산뜻돋움");
             bodyFont.setFontHeightInPoints((short)10);
+            bodyFont.setColor(IndexedColors.BLACK.getIndex());
 
             Font headerFont = wb.createFont();
             headerFont.setFontName("한컴산뜻돋움");
@@ -276,6 +277,8 @@ public class JsonToExcelGeneral {
             bodyCenter.setVerticalAlignment(VerticalAlignment.CENTER);
             bodyCenter.setWrapText(true);
             bodyCenter.setFont(bodyFont);
+            bodyCenter.setFillForegroundColor(IndexedColors.WHITE.getIndex());
+            bodyCenter.setFillPattern(FillPatternType.SOLID_FOREGROUND);
 
             CellStyle methodMerged = wb.createCellStyle();
             methodMerged.cloneStyleFrom(base);
@@ -283,6 +286,8 @@ public class JsonToExcelGeneral {
             methodMerged.setVerticalAlignment(VerticalAlignment.CENTER);
             methodMerged.setWrapText(true);
             methodMerged.setFont(bodyFont);
+            methodMerged.setFillForegroundColor(IndexedColors.WHITE.getIndex());
+            methodMerged.setFillPattern(FillPatternType.SOLID_FOREGROUND);
 
             CellStyle num1 = wb.createCellStyle();
             num1.cloneStyleFrom(bodyCenter);
