@@ -61,6 +61,7 @@ public class HwpToJson {
 
     // allergens handling
     private static final Pattern ALLERGENS = Pattern.compile("^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]+$");
+    private static final Pattern ALLERGENS_AMP_PREFIX = Pattern.compile("^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲]+\\s*&");
 
     // parsed year-month from filename
     private Integer PARSED_YEAR = null;
@@ -465,11 +466,12 @@ public class HwpToJson {
         return SPACES_ONLY.matcher(t).replaceAll(" ").trim();
     }
 
-    private List<String> splitMenusByLineThenSlash(String rawWithNewlines) {
+    List<String> splitMenusByLineThenSlash(String rawWithNewlines) {
         List<String> out = new ArrayList<>();
         String cleaned = stripSpacesKeepNewlines(rawWithNewlines);
         if (cleaned.isEmpty()) return out;
 
+        int standaloneAllergenIndex = -1;
         for (String line : cleaned.split("\\r?\\n")) {
             String lineTrim = line.trim();
             if (lineTrim.isEmpty()) continue;
@@ -480,12 +482,31 @@ public class HwpToJson {
             }
             if (dropLine) continue;
 
+            boolean firstPart = true;
             for (String part : lineTrim.split("/")) {
                 String v = part.trim();
+                boolean atLineStart = firstPart;
+                firstPart = false;
                 if (v.isEmpty()) continue;
                 if (DROP_TOKENS_MISC.contains(v)) continue;
                 if (DROP_TOKENS_FOODS.contains(v)) continue;
-                out.add(v);
+                boolean continuation = atLineStart && !out.isEmpty()
+                        && (v.startsWith("&") || ALLERGENS_AMP_PREFIX.matcher(v).find()
+                        || out.get(out.size() - 1).stripTrailing().endsWith("&"));
+                if (continuation) {
+                    int last = out.size() - 1;
+                    if (v.startsWith("&") && last > 0 && standaloneAllergenIndex == last
+                            && ALLERGENS.matcher(out.get(last)).matches()) {
+                        String allergens = out.remove(last);
+                        out.set(last - 1, out.get(last - 1) + allergens + v);
+                    } else {
+                        out.set(last, out.get(last) + v);
+                    }
+                } else {
+                    out.add(v);
+                    standaloneAllergenIndex = v.equals(lineTrim) && ALLERGENS.matcher(v).matches()
+                            ? out.size() - 1 : -1;
+                }
             }
         }
         return out;

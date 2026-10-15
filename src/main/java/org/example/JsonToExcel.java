@@ -281,9 +281,7 @@ public class JsonToExcel {
             } else {
                 Block b = sr.block;
 
-                String menuTitleToShow;
-                if (sr.matchedByExact) menuTitleToShow = nz(b.displayName);
-                else menuTitleToShow = rawMenu;
+                String menuTitleToShow = nz(b.displayName);
 
                 boolean noItemsAndNoMethod = b.items.isEmpty() && isBlank(b.method);
                 if (noItemsAndNoMethod) {
